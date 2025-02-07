@@ -5,28 +5,30 @@
 package io.strimzi.operator.cluster.operator.assembly;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaBuilder;
-import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
-import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
-import io.strimzi.api.kafka.model.status.ConditionBuilder;
-import io.strimzi.api.kafka.model.status.KafkaStatus;
-import io.strimzi.api.kafka.model.status.ListenerAddressBuilder;
-import io.strimzi.api.kafka.model.status.ListenerStatus;
-import io.strimzi.api.kafka.model.status.ListenerStatusBuilder;
+import io.strimzi.api.kafka.model.common.ConditionBuilder;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaBuilder;
+import io.strimzi.api.kafka.model.kafka.KafkaList;
+import io.strimzi.api.kafka.model.kafka.KafkaMetadataState;
+import io.strimzi.api.kafka.model.kafka.KafkaStatus;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
+import io.strimzi.api.kafka.model.kafka.listener.ListenerAddressBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.ListenerStatus;
+import io.strimzi.api.kafka.model.kafka.listener.ListenerStatusBuilder;
 import io.strimzi.certs.CertManager;
-import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
+import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
-import io.strimzi.operator.common.model.PasswordGenerator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.CrdOperator;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
-import io.strimzi.operator.common.operator.MockCertManager;
-import io.strimzi.operator.common.operator.resource.CrdOperator;
+import io.strimzi.operator.common.model.PasswordGenerator;
 import io.strimzi.operator.common.model.StatusUtils;
+import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.platform.KubernetesVersion;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -42,6 +44,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
@@ -80,25 +83,18 @@ public class KafkaStatusTest {
                 .withNewMetadata()
                     .withName(clusterName)
                     .withNamespace(namespace)
+                    .withAnnotations(Map.of(Annotations.ANNO_STRIMZI_IO_NODE_POOLS, "enabled", Annotations.ANNO_STRIMZI_IO_KRAFT, "enabled"))
                     .withGeneration(2L)
                 .endMetadata()
                 .withNewSpec()
                     .withNewKafka()
-                        .withReplicas(3)
                         .withListeners(new GenericKafkaListenerBuilder()
                                 .withName("plain")
                                 .withPort(9092)
                                 .withType(KafkaListenerType.INTERNAL)
                                 .withTls(false)
                                 .build())
-                        .withNewEphemeralStorage()
-                        .endEphemeralStorage()
                     .endKafka()
-                    .withNewZookeeper()
-                        .withReplicas(3)
-                        .withNewEphemeralStorage()
-                        .endEphemeralStorage()
-                    .endZookeeper()
                 .endSpec()
                 .withNewStatus()
                     .withObservedGeneration(1L)
@@ -342,8 +338,11 @@ public class KafkaStatusTest {
                                             .withPort(443)
                                             .build())
                                     .build())
+                    .withClusterId("old-cluster-id")
                     .withKafkaVersion("old-kafka")
                     .withOperatorLastSuccessfulVersion("old-operator")
+                    .withKafkaMetadataVersion("old-metadata-version")
+                    .withKafkaMetadataState(KafkaMetadataState.KRaft)
                 .endStatus()
                 .build();
 
@@ -380,8 +379,11 @@ public class KafkaStatusTest {
             assertThat(status.getConditions().get(0).getMessage(), is("Something went wrong"));
 
             assertThat(status.getObservedGeneration(), is(2L));
+            assertThat(status.getClusterId(), is("old-cluster-id"));
             assertThat(status.getKafkaVersion(), is("old-kafka"));
             assertThat(status.getOperatorLastSuccessfulVersion(), is("old-operator"));
+            assertThat(status.getKafkaMetadataVersion(), is("old-metadata-version"));
+            assertThat(status.getKafkaMetadataState(), is(KafkaMetadataState.KRaft));
 
             async.flag();
         })));
@@ -521,7 +523,7 @@ public class KafkaStatusTest {
         @Override
         Future<Void> reconcile(ReconciliationState reconcileState)  {
             return reconcileState.initialStatus()
-                    .map((Void) null);
+                    .mapEmpty();
         }
     }
 }

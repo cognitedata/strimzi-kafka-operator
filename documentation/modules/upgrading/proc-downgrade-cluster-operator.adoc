@@ -10,21 +10,23 @@ you can revert your installation.
 
 This procedure describes how to downgrade a Cluster Operator deployment to a previous version.
 
+NOTE: Kafka clusters managed by Strimzi always use node pools. 
+Downgrading to a cluster without node pools is not possible.
+
 .Prerequisites
 
 * An existing Cluster Operator deployment is available.
 * You have xref:downloads-{context}[downloaded the installation files for the previous version].
 
-.Before you begin
-
-Check the downgrade requirements of the xref:ref-operator-cluster-feature-gates-{context}[Strimzi feature gates].
-If a feature gate is permanently enabled, you may need to downgrade to a version that allows you to disable it before downgrading to your target version. 
+Currently, no feature gates require enabling or disabling before downgrading. 
+If a feature gate introduces such a requirement, the details will be provided here.
 
 .Procedure
 
-. Take note of any configuration changes made to the existing Cluster Operator resources (in the `/install/cluster-operator` directory).
-Any changes will be *overwritten* by the previous version of the Cluster Operator.
+. Take note of any configuration changes made during the previous Cluster Operator installation.
 +
+Any changes will be *overwritten* by the previous version of the Cluster Operator.
+
 . Revert your custom resources to reflect the supported configuration options available for the version of Strimzi you are downgrading to.
 
 . Update the Cluster Operator.

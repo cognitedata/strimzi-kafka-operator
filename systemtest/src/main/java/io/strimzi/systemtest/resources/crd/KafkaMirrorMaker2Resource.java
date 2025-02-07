@@ -10,12 +10,12 @@ import io.fabric8.kubernetes.api.model.LabelSelectorBuilder;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.Crds;
-import io.strimzi.api.kafka.KafkaMirrorMaker2List;
-import io.strimzi.api.kafka.model.KafkaMirrorMaker2;
+import io.strimzi.api.kafka.model.mirrormaker2.KafkaMirrorMaker2;
+import io.strimzi.api.kafka.model.mirrormaker2.KafkaMirrorMaker2List;
 import io.strimzi.operator.common.model.Labels;
+import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.ResourceType;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaMirrorMaker2Utils;
-import io.strimzi.systemtest.resources.ResourceManager;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -55,8 +55,8 @@ public class KafkaMirrorMaker2Resource implements ResourceType<KafkaMirrorMaker2
         return Crds.kafkaMirrorMaker2Operation(ResourceManager.kubeClient().getClient());
     }
 
-    public static void replaceKafkaMirrorMaker2ResourceInSpecificNamespace(String resourceName, Consumer<KafkaMirrorMaker2> editor, String namespaceName) {
-        ResourceManager.replaceCrdResource(KafkaMirrorMaker2.class, KafkaMirrorMaker2List.class, resourceName, editor, namespaceName);
+    public static void replaceKafkaMirrorMaker2ResourceInSpecificNamespace(String namespaceName, String resourceName, Consumer<KafkaMirrorMaker2> editor) {
+        ResourceManager.replaceCrdResource(namespaceName, KafkaMirrorMaker2.class, KafkaMirrorMaker2List.class, resourceName, editor);
     }
 
     public static LabelSelector getLabelSelector(String clusterName, String componentName) {

@@ -10,6 +10,7 @@ import io.strimzi.operator.cluster.leaderelection.LeaderElectionManagerConfig;
 import io.strimzi.operator.cluster.model.ImagePullPolicy;
 import io.strimzi.operator.cluster.model.UnsupportedVersionException;
 import io.strimzi.operator.common.InvalidConfigurationException;
+import io.strimzi.operator.common.featuregates.FeatureGates;
 import io.strimzi.operator.common.model.Labels;
 import org.junit.jupiter.api.Test;
 
@@ -40,12 +41,12 @@ public class ClusterOperatorConfigTest {
         ENV_VARS.put(ClusterOperatorConfig.CONNECT_BUILD_TIMEOUT_MS.key(), "40000");
         ENV_VARS.put(ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES, KafkaVersionTestUtils.getKafkaImagesEnvVarString());
         ENV_VARS.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES, KafkaVersionTestUtils.getKafkaConnectImagesEnvVarString());
-        ENV_VARS.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMakerImagesEnvVarString());
         ENV_VARS.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMaker2ImagesEnvVarString());
         ENV_VARS.put(ClusterOperatorConfig.OPERATOR_NAMESPACE.key(), "operator-namespace");
-        ENV_VARS.put(ClusterOperatorConfig.FEATURE_GATES.key(), "-KafkaNodePools");
+        ENV_VARS.put(ClusterOperatorConfig.FEATURE_GATES.key(), "-ContinueReconciliationOnManualRollingUpdateFailure");
         ENV_VARS.put(ClusterOperatorConfig.DNS_CACHE_TTL.key(), "10");
         ENV_VARS.put(ClusterOperatorConfig.POD_SECURITY_PROVIDER_CLASS.key(), "my.package.CustomPodSecurityProvider");
+        ENV_VARS.put(ClusterOperatorConfig.POD_DISRUPTION_BUDGET_GENERATION.key(), "false");
     }
 
     @Test
@@ -56,6 +57,7 @@ public class ClusterOperatorConfigTest {
         envVars.remove(ClusterOperatorConfig.CONNECT_BUILD_TIMEOUT_MS.key());
         envVars.remove(ClusterOperatorConfig.FEATURE_GATES.key());
         envVars.remove(ClusterOperatorConfig.POD_SECURITY_PROVIDER_CLASS.key());
+        envVars.remove(ClusterOperatorConfig.POD_DISRUPTION_BUDGET_GENERATION.key());
 
         ClusterOperatorConfig config = ClusterOperatorConfig.buildFromMap(envVars, KafkaVersionTestUtils.getKafkaVersionLookup());
 
@@ -65,13 +67,12 @@ public class ClusterOperatorConfigTest {
         assertThat(config.getConnectBuildTimeoutMs(), is(Long.parseLong(ClusterOperatorConfig.CONNECT_BUILD_TIMEOUT_MS.defaultValue())));
         assertThat(config.getOperatorNamespace(), is("operator-namespace"));
         assertThat(config.getOperatorNamespaceLabels(), is(nullValue()));
-        assertThat(config.featureGates().kafkaNodePoolsEnabled(), is(true));
-        assertThat(config.featureGates().useKRaftEnabled(), is(false));
-        assertThat(config.isCreateClusterRoles(), is(false));
+        assertThat(config.featureGates(), is(new FeatureGates("")));
         assertThat(config.isNetworkPolicyGeneration(), is(true));
         assertThat(config.isPodSetReconciliationOnly(), is(false));
         assertThat(config.getPodSecurityProviderClass(), is(ClusterOperatorConfig.POD_SECURITY_PROVIDER_CLASS.defaultValue()));
         assertThat(config.getLeaderElectionConfig(), is(nullValue()));
+        assertThat(config.isPodDisruptionBudgetGeneration(), is(true));
     }
 
     @Test
@@ -79,7 +80,6 @@ public class ClusterOperatorConfigTest {
         ClusterOperatorConfig config = new ClusterOperatorConfig.ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup())
                 .with(ClusterOperatorConfig.NAMESPACE.key(), "namespace")
                 .with(ClusterOperatorConfig.OPERATION_TIMEOUT_MS.key(), "30000")
-                .with(ClusterOperatorConfig.ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS.key(), "20000")
                 .with(ClusterOperatorConfig.CONNECT_BUILD_TIMEOUT_MS.key(), "120000")
                 .with(ClusterOperatorConfig.DNS_CACHE_TTL.key(), "10")
                 .build();
@@ -87,7 +87,6 @@ public class ClusterOperatorConfigTest {
         assertThat(config.getNamespaces(), is(singleton("namespace")));
         assertThat(config.getReconciliationIntervalMs(), is(120_000L));
         assertThat(config.getOperationTimeoutMs(), is(30_000L));
-        assertThat(config.getZkAdminSessionTimeoutMs(), is(20_000));
         assertThat(config.getConnectBuildTimeoutMs(), is(120_000L));
         assertThat(config.getDnsCacheTtlSec(), is(10));
     }
@@ -101,9 +100,10 @@ public class ClusterOperatorConfigTest {
         assertThat(config.getOperationTimeoutMs(), is(30_000L));
         assertThat(config.getConnectBuildTimeoutMs(), is(40_000L));
         assertThat(config.getOperatorNamespace(), is("operator-namespace"));
-        assertThat(config.featureGates().kafkaNodePoolsEnabled(), is(false));
+        assertThat(config.featureGates().continueOnManualRUFailureEnabled(), is(false));
         assertThat(config.getDnsCacheTtlSec(), is(10));
         assertThat(config.getPodSecurityProviderClass(), is("my.package.CustomPodSecurityProvider"));
+        assertThat(config.isPodDisruptionBudgetGeneration(), is(false));
     }
 
     @Test
@@ -118,15 +118,16 @@ public class ClusterOperatorConfigTest {
         assertThat(config.getOperationTimeoutMs(), is(Long.parseLong(ClusterOperatorConfig.OPERATION_TIMEOUT_MS.defaultValue())));
         assertThat(config.getOperatorNamespace(), is(nullValue()));
         assertThat(config.getOperatorNamespaceLabels(), is(nullValue()));
+        assertThat(config.featureGates().continueOnManualRUFailureEnabled(), is(true));
         assertThat(config.getDnsCacheTtlSec(), is(Integer.parseInt(ClusterOperatorConfig.DNS_CACHE_TTL.defaultValue())));
         assertThat(config.getPodSecurityProviderClass(), is(ClusterOperatorConfig.POD_SECURITY_PROVIDER_CLASS.defaultValue()));
+        assertThat(config.isPodDisruptionBudgetGeneration(), is(true));
     }
 
     private Map<String, String> envWithImages() {
         Map<String, String> envVars = new HashMap<>(5);
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES, KafkaVersionTestUtils.getKafkaImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES, KafkaVersionTestUtils.getKafkaConnectImagesEnvVarString());
-        envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMakerImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMaker2ImagesEnvVarString());
         return envVars;
     }
@@ -270,7 +271,6 @@ public class ClusterOperatorConfigTest {
         Map<String, String> envVars = new HashMap<>(5);
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES, KafkaVersionTestUtils.getKafkaImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES, KafkaVersionTestUtils.getKafkaConnectImagesEnvVarString());
-        envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMakerImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMaker2ImagesEnvVarString());
 
         assertDoesNotThrow(() -> ClusterOperatorConfig.buildFromMap(envVars));
@@ -281,7 +281,6 @@ public class ClusterOperatorConfigTest {
         Map<String, String> envVars = new HashMap<>(5);
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES, KafkaVersionTestUtils.getKafkaImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES, KafkaVersionTestUtils.getKafkaConnectImagesEnvVarString());
-        envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMakerImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMaker2ImagesEnvVarString());
 
         for (Map.Entry<String, String> envVar : envVars.entrySet())    {
@@ -298,7 +297,6 @@ public class ClusterOperatorConfigTest {
         Map<String, String> envVars = new HashMap<>(5);
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES, KafkaVersionTestUtils.getKafkaImagesEnvVarString() + " 2.6.0=myimage:2.6.0");
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES, KafkaVersionTestUtils.getKafkaConnectImagesEnvVarString());
-        envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMakerImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMaker2ImagesEnvVarString());
 
         Throwable exception = assertThrows(InvalidConfigurationException.class, () -> ClusterOperatorConfig.buildFromMap(envVars));
@@ -330,6 +328,8 @@ public class ClusterOperatorConfigTest {
 
     @Test
     public void testInvalidFeatureGate() {
+        // We test that the configuration is really parsing the feature gates environment variable. We test it on
+        // non-existing feature gate instead of a real one so that we do not have to change it when the FGs are promoted
         Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.ENV_VARS);
         envVars.put(ClusterOperatorConfig.FEATURE_GATES.key(), "-NonExistingGate");
 

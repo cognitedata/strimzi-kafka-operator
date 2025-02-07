@@ -5,14 +5,14 @@
 package io.strimzi.operator.cluster.operator.assembly;
 
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
-import io.strimzi.api.kafka.model.status.KafkaStatus;
+import io.strimzi.api.kafka.model.kafka.KafkaStatus;
 import io.strimzi.operator.cluster.model.StorageUtils;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.PvcOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.StorageClassOperator;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
-import io.strimzi.operator.common.operator.resource.PvcOperator;
 import io.strimzi.operator.common.model.StatusUtils;
-import io.strimzi.operator.common.operator.resource.StorageClassOperator;
 import io.vertx.core.Future;
 
 import java.util.ArrayList;
@@ -21,10 +21,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.function.Function;
 
 /**
- * This class reconciles the PVCs for the Kafka and ZooKeeper clusters. It has two public methods:
+ * This class reconciles the PVCs for the Kafka clusters. It has two public methods:
  *   - resizeAndReconcilePvcs for creating, updating and resizing PVCs which are needed by the cluster
  *   - deletePersistentClaims method for deleting PVCs not needed anymore and marked for deletion
  */
@@ -50,18 +49,17 @@ public class PvcReconciler {
 
     /**
      * Resizes and reconciles the PVCs based on the model and list of PVCs passed to it. It will return a future with
-     * collection containing a list of pods which need restart to complete the filesystem resizing. The PVCs are only
-     * created or updated. This method does not delete any PVCs. This is done by a separate method which should be
+     * collection containing a list of IDs of nodes which need restart to complete the filesystem resizing. The PVCs are
+     * only created or updated. This method does not delete any PVCs. This is done by a separate method which should be
      * called separately at the end of the reconciliation.
      *
-     * @param kafkaStatus       Status of the Kafka custom resource where warnings about any issues with resizing will be added
-     * @param podNameProvider   Function to generate a pod name from its index
-     * @param pvcs              List of desired PVC used by this controller
+     * @param kafkaStatus   Status of the Kafka custom resource where warnings about any issues with resizing will be added
+     * @param pvcs          List of desired PVC used by this controller
      *
-     * @return                  Future with list of pod names which should be restarted to complete the filesystem resizing
+     * @return Future with set of node IDs which should be restarted to complete the filesystem resizing
      */
-    public Future<Collection<String>> resizeAndReconcilePvcs(KafkaStatus kafkaStatus, Function<Integer, String> podNameProvider, List<PersistentVolumeClaim> pvcs) {
-        Set<String> podsToRestart = new HashSet<>();
+    public Future<Collection<Integer>> resizeAndReconcilePvcs(KafkaStatus kafkaStatus, List<PersistentVolumeClaim> pvcs) {
+        Set<Integer> podIdsToRestart = new HashSet<>();
         List<Future<Void>> futures = new ArrayList<>(pvcs.size());
 
         for (PersistentVolumeClaim desiredPvc : pvcs)  {
@@ -72,16 +70,15 @@ public class PvcReconciler {
                             // * The PVC doesn't exist yet, we should create it
                             // * The PVC is not Bound, we should reconcile it
                             return pvcOperator.reconcile(reconciliation, reconciliation.namespace(), desiredPvc.getMetadata().getName(), desiredPvc)
-                                    .map((Void) null);
+                                    .mapEmpty();
                         } else if (currentPvc.getStatus().getConditions().stream().anyMatch(cond -> "Resizing".equals(cond.getType()) && "true".equals(cond.getStatus().toLowerCase(Locale.ENGLISH))))  {
                             // The PVC is Bound, but it is already resizing => Nothing to do, we should let it resize
                             LOGGER.debugCr(reconciliation, "The PVC {} is resizing, nothing to do", desiredPvc.getMetadata().getName());
                             return Future.succeededFuture();
                         } else if (currentPvc.getStatus().getConditions().stream().anyMatch(cond -> "FileSystemResizePending".equals(cond.getType()) && "true".equals(cond.getStatus().toLowerCase(Locale.ENGLISH))))  {
                             // The PVC is Bound and resized but waiting for FS resizing => We need to restart the pod which is using it
-                            String podName = podNameProvider.apply(getPodIndexFromPvcName(desiredPvc.getMetadata().getName()));
-                            podsToRestart.add(podName);
-                            LOGGER.infoCr(reconciliation, "The PVC {} is waiting for file system resizing and the pod {} needs to be restarted.", desiredPvc.getMetadata().getName(), podName);
+                            podIdsToRestart.add(getPodIndexFromPvcName(desiredPvc.getMetadata().getName()));
+                            LOGGER.infoCr(reconciliation, "The PVC {} is waiting for file system resizing and the pod using it might need to be restarted.", desiredPvc.getMetadata().getName());
                             return Future.succeededFuture();
                         } else {
                             // The PVC is Bound and resizing is not in progress => We should check if the SC supports resizing and check if size changed
@@ -94,7 +91,7 @@ public class PvcReconciler {
                             } else  {
                                 // size didn't change, just reconcile
                                 return pvcOperator.reconcile(reconciliation, reconciliation.namespace(), desiredPvc.getMetadata().getName(), desiredPvc)
-                                        .map((Void) null);
+                                        .mapEmpty();
                             }
                         }
                     });
@@ -103,7 +100,7 @@ public class PvcReconciler {
         }
 
         return Future.all(futures)
-                .map(podsToRestart);
+                .map(podIdsToRestart);
     }
 
     /**
@@ -139,7 +136,7 @@ public class PvcReconciler {
                             // Resizing supported by SC => We can reconcile the PVC to have it resized
                             LOGGER.infoCr(reconciliation, "Resizing PVC {} from {} to {}.", desired.getMetadata().getName(), current.getStatus().getCapacity().get("storage").getAmount(), desired.getSpec().getResources().getRequests().get("storage").getAmount());
                             return pvcOperator.reconcile(reconciliation, reconciliation.namespace(), desired.getMetadata().getName(), desired)
-                                    .map((Void) null);
+                                    .mapEmpty();
                         }
                     });
         } else {
@@ -169,7 +166,7 @@ public class PvcReconciler {
         }
 
         return Future.all(futures)
-                .map((Void) null);
+                .mapEmpty();
     }
 
     /**
@@ -182,10 +179,11 @@ public class PvcReconciler {
     private Future<Void> considerPersistentClaimDeletion(String pvcName)   {
         return pvcOperator.getAsync(reconciliation.namespace(), pvcName)
                 .compose(pvc -> {
-                    if (Annotations.booleanAnnotation(pvc, Annotations.ANNO_STRIMZI_IO_DELETE_CLAIM, false)) {
+                    // The PVC might be null in case it was deleted in the mean time by something else such as garbage collection
+                    if (pvc != null && Annotations.booleanAnnotation(pvc, Annotations.ANNO_STRIMZI_IO_DELETE_CLAIM, false)) {
                         LOGGER.infoCr(reconciliation, "Deleting PVC {}", pvcName);
                         return pvcOperator.reconcile(reconciliation, reconciliation.namespace(), pvcName, null)
-                                .map((Void) null);
+                                .mapEmpty();
                     } else {
                         return Future.succeededFuture();
                     }

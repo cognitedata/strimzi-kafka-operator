@@ -16,20 +16,23 @@ import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
-import io.strimzi.api.kafka.model.ContainerEnvVar;
-import io.strimzi.api.kafka.model.ContainerEnvVarBuilder;
-import io.strimzi.systemtest.Constants;
+import io.strimzi.api.kafka.model.common.template.ContainerEnvVar;
+import io.strimzi.api.kafka.model.common.template.ContainerEnvVarBuilder;
 import io.strimzi.systemtest.Environment;
+import io.strimzi.systemtest.TestConstants;
+import io.strimzi.systemtest.TestTags;
+import io.strimzi.systemtest.annotations.SkipDefaultNetworkPolicyCreation;
 import io.strimzi.systemtest.resources.crd.KafkaResource;
+import io.strimzi.systemtest.resources.crd.StrimziPodSetResource;
 import io.strimzi.systemtest.utils.kubeUtils.controllers.StrimziPodSetUtils;
 import io.strimzi.test.TestUtils;
 import io.strimzi.test.k8s.KubeClusterResource;
 import io.vertx.core.json.DecodeException;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.ClassDescriptor;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
@@ -40,10 +43,12 @@ import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.StringTokenizer;
 import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -101,14 +106,14 @@ public class StUtils {
     public static String changeOrgAndTag(String image) {
         Matcher m = IMAGE_PATTERN_FULL_PATH.matcher(image);
         if (m.find()) {
-            String registry = setImageProperties(m.group("registry"), Environment.STRIMZI_REGISTRY, Environment.STRIMZI_REGISTRY_DEFAULT);
-            String org = setImageProperties(m.group("org"), Environment.STRIMZI_ORG, Environment.STRIMZI_ORG_DEFAULT);
+            String registry = setImageProperties(m.group("registry"), Environment.STRIMZI_REGISTRY);
+            String org = setImageProperties(m.group("org"), Environment.STRIMZI_ORG);
 
             return registry + "/" + org + "/" + m.group("image") + ":" + buildTag(m.group("tag"));
         }
         m = IMAGE_PATTERN.matcher(image);
         if (m.find()) {
-            String org = setImageProperties(m.group("org"), Environment.STRIMZI_ORG, Environment.STRIMZI_ORG_DEFAULT);
+            String org = setImageProperties(m.group("org"), Environment.STRIMZI_ORG);
 
             return Environment.STRIMZI_REGISTRY + "/" + org + "/" + m.group("image") + ":"  + buildTag(m.group("tag"));
         }
@@ -125,15 +130,15 @@ public class StUtils {
         return sb.toString();
     }
 
-    private static String setImageProperties(String current, String envVar, String defaultEnvVar) {
-        if (!envVar.equals(defaultEnvVar) && !current.equals(envVar)) {
+    private static String setImageProperties(String current, String envVar) {
+        if (!envVar.isEmpty() && !current.equals(envVar)) {
             return envVar;
         }
         return current;
     }
 
     private static String buildTag(String currentTag) {
-        if (!currentTag.equals(Environment.STRIMZI_TAG) && !Environment.STRIMZI_TAG_DEFAULT.equals(Environment.STRIMZI_TAG)) {
+        if (!Environment.STRIMZI_TAG.isEmpty() && !currentTag.equals(Environment.STRIMZI_TAG)) {
             Matcher t = KAFKA_COMPONENT_PATTERN.matcher(currentTag);
             if (t.find()) {
                 currentTag = Environment.STRIMZI_TAG + t.group("kafka") + t.group("version");
@@ -226,7 +231,7 @@ public class StUtils {
     public static JsonArray expectedServiceDiscoveryInfo(int port, String protocol, String auth, boolean tls) {
         JsonObject jsonObject = new JsonObject();
         jsonObject.put("port", port);
-        jsonObject.put(Constants.TLS_LISTENER_DEFAULT_NAME, tls);
+        jsonObject.put(TestConstants.TLS_LISTENER_DEFAULT_NAME, tls);
         jsonObject.put("protocol", protocol);
         jsonObject.put("auth", auth);
 
@@ -261,7 +266,7 @@ public class StUtils {
         //this is only for decrease the number of records - kafka have record/line, operators record/11lines
         String tail = "--tail=" + (containerName.contains("operator") ? "100" : "10");
 
-        TestUtils.waitFor("JSON log to be present in " + pods, Constants.GLOBAL_POLL_INTERVAL_MEDIUM, Constants.GLOBAL_TIMEOUT, () -> {
+        TestUtils.waitFor("JSON log to be present in " + pods, TestConstants.GLOBAL_POLL_INTERVAL_MEDIUM, TestConstants.GLOBAL_TIMEOUT, () -> {
             boolean isJSON = false;
             for (String podName : pods.keySet()) {
                 String log = cmdKubeClient().namespace(namespaceName).execInCurrentNamespace(Level.TRACE, "logs", podName, "-c", containerName, tail).out();
@@ -312,7 +317,7 @@ public class StUtils {
      * @param exceptedString log message to be checked
      */
     public static void waitUntilLogFromPodContainsString(String namespaceName, String podName, String containerName, String timeSince, String exceptedString) {
-        TestUtils.waitFor("log from Pod: " + namespaceName + "/" + podName + " to contain string: " + exceptedString, Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
+        TestUtils.waitFor("log from Pod: " + namespaceName + "/" + podName + " to contain string: " + exceptedString, TestConstants.GLOBAL_POLL_INTERVAL, TestConstants.GLOBAL_TIMEOUT,
             () -> getLogFromPodByTime(namespaceName, podName, containerName, timeSince).contains(exceptedString));
     }
 
@@ -320,11 +325,10 @@ public class StUtils {
      * Change Deployment configuration before applying it. We set different namespace, log level and image pull policy.
      * It's mostly used for use cases where we use direct kubectl command instead of fabric8 calls to api.
      * @param deploymentFile loaded Strimzi deployment file
-     * @param namespace Namespace where Strimzi should be installed
      * @param strimziFeatureGatesValue feature gates value
      * @return deployment file content as String
      */
-    public static String changeDeploymentConfiguration(File deploymentFile, String namespace, final String strimziFeatureGatesValue) {
+    public static String changeDeploymentConfiguration(String namespaceName, File deploymentFile, final String strimziFeatureGatesValue) {
         YAMLMapper mapper = new YAMLMapper();
         try {
             JsonNode node = mapper.readTree(deploymentFile);
@@ -335,7 +339,7 @@ public class StUtils {
                 if (varName.matches("STRIMZI_NAMESPACE")) {
                     // Replace all the default images with ones from the $DOCKER_ORG org and with the $DOCKER_TAG tag
                     ((ObjectNode) envVar).remove("valueFrom");
-                    ((ObjectNode) envVar).put("value", namespace);
+                    ((ObjectNode) envVar).put("value", namespaceName);
                 }
 
                 if (varName.matches("STRIMZI_LOG_LEVEL")) {
@@ -377,7 +381,7 @@ public class StUtils {
      * otherwise false
      */
     public static boolean isParallelTest(Object annotationHolder) {
-        return CONTAINS_ANNOTATION.apply(Constants.PARALLEL_TEST, annotationHolder);
+        return CONTAINS_ANNOTATION.apply(TestTags.PARALLEL_TEST, annotationHolder);
     }
 
     /**
@@ -387,7 +391,7 @@ public class StUtils {
      * otherwise false
      */
     public static boolean isIsolatedTest(Object annotationHolder) {
-        return CONTAINS_ANNOTATION.apply(Constants.ISOLATED_TEST, annotationHolder);
+        return CONTAINS_ANNOTATION.apply(TestTags.ISOLATED_TEST, annotationHolder);
     }
 
     /**
@@ -397,37 +401,49 @@ public class StUtils {
      * otherwise false
      */
     public static boolean isParallelNamespaceTest(Object annotationHolder) {
-        return CONTAINS_ANNOTATION.apply(Constants.PARALLEL_NAMESPACE, annotationHolder);
+        return CONTAINS_ANNOTATION.apply(TestTags.PARALLEL_NAMESPACE, annotationHolder);
+    }
+
+    /**
+     * Checking if test case contains annotation {@link io.strimzi.systemtest.annotations.SkipDefaultNetworkPolicyCreation}
+     * @param annotationHolder context of the test case
+     * @return true if test case contains annotation {@link io.strimzi.systemtest.annotations.SkipDefaultNetworkPolicyCreation},
+     * otherwise false
+     */
+    public static boolean shouldSkipNetworkPoliciesCreation(Object annotationHolder) {
+        return CONTAINS_ANNOTATION.apply(SkipDefaultNetworkPolicyCreation.class.getName().toLowerCase(Locale.ROOT), annotationHolder);
     }
 
     /**
      * Retrieve namespace based on the cluster configuration
-     * @param namespace suite namespace
+     *
+     * @param namespaceName    suite namespace
      * @param extensionContext test context for get the parallel namespace
      * @return single or parallel namespace based on cluster configuration
      */
-    public static String getNamespaceBasedOnRbac(String namespace, ExtensionContext extensionContext) {
-        return Environment.isNamespaceRbacScope() ? namespace : extensionContext.getStore(ExtensionContext.Namespace.GLOBAL).get(Constants.NAMESPACE_KEY).toString();
+    public static String getNamespaceBasedOnRbac(String namespaceName, ExtensionContext extensionContext) {
+        return Environment.isNamespaceRbacScope() ? namespaceName : extensionContext.getStore(ExtensionContext.Namespace.GLOBAL).get(TestConstants.NAMESPACE_KEY).toString();
     }
 
     /**
      * Copies the image pull secret from the default namespace to the specified target namespace.
-     * @param namespace the target namespace
+     *
+     * @param namespaceName the target namespace
      */
-    public static void copyImagePullSecrets(String namespace) {
+    public static void copyImagePullSecrets(String namespaceName) {
         if (Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET != null && !Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET.isEmpty()) {
             LOGGER.info("Checking if Secret: {} is in the default Namespace", Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET);
             if (kubeClient("default").getSecret(Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET) == null) {
                 throw new RuntimeException(Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET + " is not in the default Namespace!");
             }
-            LOGGER.info("Creating pull Secret: {}/{}", namespace, Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET);
+            LOGGER.info("Creating pull Secret: {}/{}", namespaceName, Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET);
             Secret pullSecret = kubeClient("default").getSecret(Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET);
-            kubeClient(namespace).createSecret(new SecretBuilder()
+            kubeClient(namespaceName).createSecret(new SecretBuilder()
                 .withApiVersion("v1")
                 .withKind("Secret")
                 .withNewMetadata()
                     .withName(Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET)
-                    .withNamespace(namespace)
+                    .withNamespace(namespaceName)
                 .endMetadata()
                 .withType("kubernetes.io/dockerconfigjson")
                 .withData(Collections.singletonMap(".dockerconfigjson", pullSecret.getData().get(".dockerconfigjson")))
@@ -438,14 +454,14 @@ public class StUtils {
             if (kubeClient("default").getSecret(Environment.CONNECT_BUILD_REGISTRY_SECRET) == null) {
                 throw new RuntimeException(Environment.CONNECT_BUILD_REGISTRY_SECRET + " is not in the default namespace!");
             }
-            LOGGER.info("Creating pull Secret: {}/{}", namespace, Environment.CONNECT_BUILD_REGISTRY_SECRET);
+            LOGGER.info("Creating pull Secret: {}/{}", namespaceName, Environment.CONNECT_BUILD_REGISTRY_SECRET);
             Secret pullSecret = kubeClient("default").getSecret(Environment.CONNECT_BUILD_REGISTRY_SECRET);
-            kubeClient(namespace).createSecret(new SecretBuilder()
+            kubeClient(namespaceName).createSecret(new SecretBuilder()
                 .withApiVersion("v1")
                 .withKind("Secret")
                 .withNewMetadata()
                     .withName(Environment.CONNECT_BUILD_REGISTRY_SECRET)
-                    .withNamespace(namespace)
+                    .withNamespace(namespaceName)
                 .endMetadata()
                 .withType("kubernetes.io/dockerconfigjson")
                 .withData(Collections.singletonMap(".dockerconfigjson", pullSecret.getData().get(".dockerconfigjson")))
@@ -526,27 +542,88 @@ public class StUtils {
      * Returns a list of names of ConfigMaps with broker configuration files.
      * For StrimziPodSets, it should be a ConfigMap per broker.
      *
+     * @param namespaceName  Name of the Namespace where is the Kafka cluster running
      * @param kafkaClusterName  Name of the Kafka cluster
-     * @param replicas          Number of Kafka replicas
      *
      * @return                  List with ConfigMaps containing the configuration
      */
-    public static List<String> getKafkaConfigurationConfigMaps(String kafkaClusterName, int replicas)    {
-        List<String> cmNames = new ArrayList<>(replicas);
+    public static List<String> getKafkaConfigurationConfigMaps(String namespaceName, String kafkaClusterName) {
+        return kubeClient().listPodNames(namespaceName, KafkaResource.getLabelSelector(kafkaClusterName, StrimziPodSetResource.getBrokerComponentName(kafkaClusterName)));
+    }
 
-        for (int i = 0; i < replicas; i++)  {
-            cmNames.add(KafkaResource.getKafkaPodName(kafkaClusterName, i));
+    public static void waitUntilSuppliersAreMatching(final Supplier<?> sup, final Supplier<?> anotherSup) {
+        TestUtils.waitFor(sup.get() + " is matching with" + anotherSup.get(), TestConstants.GLOBAL_POLL_INTERVAL,
+                TestConstants.GLOBAL_STATUS_TIMEOUT, () -> sup.get().equals(anotherSup.get()));
+    }
+
+    public static void waitUntilSupplierIsSatisfied(String message, final BooleanSupplier sup) {
+        TestUtils.waitFor(message, TestConstants.GLOBAL_POLL_INTERVAL,
+                TestConstants.GLOBAL_STATUS_TIMEOUT, sup);
+    }
+
+    /**
+     * Indents the input string with for empty spaces at the beginning of each line.
+     *
+     * @param input     Input string that should be indented
+     *
+     * @return  Indented string
+     */
+    public static String indent(String input) {
+        StringBuilder sb = new StringBuilder();
+        String[] lines = input.split("[\n\r]");
+
+        for (String line : lines) {
+            sb.append("    ").append(line).append(System.lineSeparator());
         }
 
-        return cmNames;
-    }
-    public static void waitUntilSuppliersAreMatching(final Supplier<?> sup, final Supplier<?> anotherSup) {
-        TestUtils.waitFor(sup.get() + " is matching with" + anotherSup.get(), Constants.GLOBAL_POLL_INTERVAL,
-                Constants.GLOBAL_STATUS_TIMEOUT, () -> sup.get().equals(anotherSup.get()));
+        return sb.toString();
     }
 
-    public static void waitUntilSupplierIsSatisfied(final BooleanSupplier sup) {
-        TestUtils.waitFor(sup.getAsBoolean() + " is satisfied", Constants.GLOBAL_POLL_INTERVAL,
-                Constants.GLOBAL_STATUS_TIMEOUT, sup);
+    /**
+     * Changes the {@code subject} of the RoleBinding in the given YAML resource to be the
+     * {@code strimzi-cluster-operator} {@code ServiceAccount} in the given namespace.
+     *
+     * @param roleBindingFile   The RoleBinding YAML file to load and change
+     * @param namespace         Namespace of the service account which should be the subject of this RoleBinding
+     *
+     * @return Modified RoleBinding resource YAML
+     */
+    public static String changeRoleBindingSubject(File roleBindingFile, String namespace) {
+        YAMLMapper mapper = new YAMLMapper();
+        try {
+            JsonNode node = mapper.readTree(roleBindingFile);
+            ArrayNode subjects = (ArrayNode) node.get("subjects");
+            ObjectNode subject = (ObjectNode) subjects.get(0);
+            subject.put("kind", "ServiceAccount")
+                .put("name", "strimzi-cluster-operator")
+                .put("namespace", namespace);
+            return mapper.writeValueAsString(node);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Parse the image map String into a Map.
+     *
+     * @param imageMapString    String with the image map (contains key-value pairs separated by new lines in a single string)
+     *
+     * @return  Map with the parsed images
+     */
+    public static Map<String, String> parseImageMap(String imageMapString) {
+        if (imageMapString != null) {
+            StringTokenizer tok = new StringTokenizer(imageMapString, ", \t\n\r");
+            HashMap<String, String> map = new HashMap<>();
+            while (tok.hasMoreTokens()) {
+                String versionImage = tok.nextToken();
+                int endIndex = versionImage.indexOf('=');
+                String version = versionImage.substring(0, endIndex);
+                String image = versionImage.substring(endIndex + 1);
+                map.put(version.trim(), image.trim());
+            }
+            return Collections.unmodifiableMap(map);
+        } else {
+            return Collections.emptyMap();
+        }
     }
 }

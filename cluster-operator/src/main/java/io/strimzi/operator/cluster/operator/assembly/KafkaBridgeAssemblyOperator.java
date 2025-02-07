@@ -4,38 +4,42 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
-import io.strimzi.api.kafka.KafkaBridgeList;
-import io.strimzi.api.kafka.model.CertSecretSource;
-import io.strimzi.api.kafka.model.KafkaBridge;
-import io.strimzi.api.kafka.model.KafkaBridgeSpec;
-import io.strimzi.api.kafka.model.authentication.KafkaClientAuthentication;
-import io.strimzi.api.kafka.model.status.KafkaBridgeStatus;
-import io.strimzi.api.kafka.model.KafkaBridgeResources;
+import io.strimzi.api.kafka.model.bridge.KafkaBridge;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeList;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeResources;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeSpec;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeStatus;
+import io.strimzi.api.kafka.model.common.CertSecretSource;
+import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthentication;
 import io.strimzi.certs.CertManager;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.model.KafkaBridgeCluster;
+import io.strimzi.operator.cluster.model.SharedEnvironmentProvider;
+import io.strimzi.operator.cluster.operator.VertxUtil;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.DeploymentOperator;
 import io.strimzi.operator.common.Annotations;
-import io.strimzi.operator.common.ReconciliationLogger;
-import io.strimzi.operator.common.VertxUtil;
-import io.strimzi.operator.common.model.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationException;
-import io.strimzi.operator.cluster.model.SharedEnvironmentProvider;
-import io.strimzi.operator.common.operator.resource.DeploymentOperator;
-import io.strimzi.operator.common.operator.resource.ReconcileResult;
+import io.strimzi.operator.common.ReconciliationLogger;
+import io.strimzi.operator.common.Util;
+import io.strimzi.operator.common.model.PasswordGenerator;
 import io.strimzi.operator.common.model.StatusUtils;
+import io.strimzi.operator.common.operator.resource.ReconcileResult;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * <p>Assembly operator for a "Kafka Bridge" assembly, which manages:</p>
@@ -48,6 +52,7 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
 
     private final DeploymentOperator deploymentOperations;
     private final SharedEnvironmentProvider sharedEnvironmentProvider;
+    private final boolean isPodDisruptionBudgetGeneration;
 
     /**
      * @param vertx The Vertx instance
@@ -64,6 +69,7 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
         super(vertx, pfa, KafkaBridge.RESOURCE_KIND, certManager, passwordGenerator, supplier.kafkaBridgeOperator, supplier, config);
         this.deploymentOperations = supplier.deploymentOperations;
         this.sharedEnvironmentProvider = supplier.sharedEnvironmentProvider;
+        this.isPodDisruptionBudgetGeneration = config.isPodDisruptionBudgetGeneration();
     }
 
     @Override
@@ -72,6 +78,8 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
 
         String namespace = reconciliation.namespace();
         KafkaBridgeCluster bridge;
+
+        Map<String, String> podAnnotations = new HashMap<>();
 
         try {
             bridge = KafkaBridgeCluster.fromCrd(reconciliation, assemblyResource, sharedEnvironmentProvider);
@@ -96,10 +104,17 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
             .compose(i -> deploymentOperations.scaleDown(reconciliation, namespace, bridge.getComponentName(), bridge.getReplicas(), operationTimeoutMs))
             .compose(scale -> serviceOperations.reconcile(reconciliation, namespace, KafkaBridgeResources.serviceName(bridge.getCluster()), bridge.generateService()))
             .compose(i -> MetricsAndLoggingUtils.metricsAndLogging(reconciliation, configMapOperations, bridge.logging(), null))
-            .compose(metricsAndLogging -> configMapOperations.reconcile(reconciliation, namespace, KafkaBridgeResources.metricsAndLogConfigMapName(reconciliation.name()), bridge.generateMetricsAndLogConfigMap(metricsAndLogging)))
-            .compose(i -> podDisruptionBudgetOperator.reconcile(reconciliation, namespace, bridge.getComponentName(), bridge.generatePodDisruptionBudget()))
+            .compose(metricsAndLogging -> {
+                ConfigMap configMap = bridge.generateBridgeConfigMap(metricsAndLogging);
+                podAnnotations.put(KafkaBridgeCluster.ANNO_STRIMZI_IO_CONFIGURATION_HASH, Util.hashStub(configMap.getData().get(KafkaBridgeCluster.BRIDGE_CONFIGURATION_FILENAME)));
+                return configMapOperations.reconcile(reconciliation, namespace, KafkaBridgeResources.configMapName(reconciliation.name()), configMap);
+            })
+            .compose(i -> isPodDisruptionBudgetGeneration ? podDisruptionBudgetOperator.reconcile(reconciliation, namespace, bridge.getComponentName(), bridge.generatePodDisruptionBudget()) : Future.succeededFuture())
             .compose(i -> VertxUtil.authTlsHash(secretOperations, namespace, auth, trustedCertificates))
-            .compose(hash -> deploymentOperations.reconcile(reconciliation, namespace, bridge.getComponentName(), bridge.generateDeployment(Collections.singletonMap(Annotations.ANNO_STRIMZI_AUTH_HASH, Integer.toString(hash)), pfa.isOpenshift(), imagePullPolicy, imagePullSecrets)))
+            .compose(authTlsHash -> {
+                podAnnotations.put(Annotations.ANNO_STRIMZI_AUTH_HASH, Integer.toString(authTlsHash));
+                return deploymentOperations.reconcile(reconciliation, namespace, bridge.getComponentName(), bridge.generateDeployment(podAnnotations, pfa.isOpenshift(), imagePullPolicy, imagePullSecrets));
+            })
             .compose(i -> deploymentOperations.scaleUp(reconciliation, namespace, bridge.getComponentName(), bridge.getReplicas(), operationTimeoutMs))
             .compose(i -> deploymentOperations.waitForObserved(reconciliation, namespace, bridge.getComponentName(), 1_000, operationTimeoutMs))
             .compose(i -> bridgeHasZeroReplicas ? Future.succeededFuture() : deploymentOperations.readiness(reconciliation, namespace, bridge.getComponentName(), 1_000, operationTimeoutMs))

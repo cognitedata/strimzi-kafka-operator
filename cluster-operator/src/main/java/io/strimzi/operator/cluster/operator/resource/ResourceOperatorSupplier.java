@@ -6,59 +6,55 @@ package io.strimzi.operator.cluster.operator.resource;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.openshift.client.OpenShiftClient;
-import io.strimzi.api.kafka.KafkaBridgeList;
-import io.strimzi.api.kafka.KafkaConnectList;
-import io.strimzi.api.kafka.KafkaConnectorList;
-import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.KafkaMirrorMaker2List;
-import io.strimzi.api.kafka.KafkaMirrorMakerList;
-import io.strimzi.api.kafka.KafkaNodePoolList;
-import io.strimzi.api.kafka.KafkaRebalanceList;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaBridge;
-import io.strimzi.api.kafka.model.KafkaConnect;
-import io.strimzi.api.kafka.model.KafkaConnector;
-import io.strimzi.api.kafka.model.KafkaMirrorMaker;
-import io.strimzi.api.kafka.model.KafkaMirrorMaker2;
-import io.strimzi.api.kafka.model.KafkaRebalance;
+import io.strimzi.api.kafka.model.bridge.KafkaBridge;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeList;
+import io.strimzi.api.kafka.model.connect.KafkaConnect;
+import io.strimzi.api.kafka.model.connect.KafkaConnectList;
+import io.strimzi.api.kafka.model.connector.KafkaConnector;
+import io.strimzi.api.kafka.model.connector.KafkaConnectorList;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaList;
+import io.strimzi.api.kafka.model.mirrormaker2.KafkaMirrorMaker2;
+import io.strimzi.api.kafka.model.mirrormaker2.KafkaMirrorMaker2List;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePool;
+import io.strimzi.api.kafka.model.nodepool.KafkaNodePoolList;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalance;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceList;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.model.DefaultSharedEnvironmentProvider;
 import io.strimzi.operator.cluster.model.SharedEnvironmentProvider;
-import io.strimzi.operator.cluster.operator.assembly.PreventBrokerScaleDownCheck;
+import io.strimzi.operator.cluster.operator.assembly.BrokersInUseCheck;
 import io.strimzi.operator.cluster.operator.resource.events.KubernetesRestartEventPublisher;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.BuildConfigOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.BuildOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ClusterRoleBindingOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ConfigMapOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.CrdOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.DeploymentOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ImageStreamOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.IngressOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.NetworkPolicyOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.NodeOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.PodDisruptionBudgetOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.PodOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.PvcOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.RoleBindingOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.RoleOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.RouteOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.SecretOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ServiceAccountOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ServiceOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.StorageClassOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.StrimziPodSetOperator;
 import io.strimzi.operator.common.AdminClientProvider;
-import io.strimzi.operator.common.BackOff;
 import io.strimzi.operator.common.DefaultAdminClientProvider;
 import io.strimzi.operator.common.MetricsProvider;
-import io.strimzi.operator.common.operator.resource.BuildConfigOperator;
-import io.strimzi.operator.common.operator.resource.BuildOperator;
-import io.strimzi.operator.common.operator.resource.ClusterRoleBindingOperator;
-import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
-import io.strimzi.operator.common.operator.resource.CrdOperator;
-import io.strimzi.operator.common.operator.resource.DeploymentOperator;
-import io.strimzi.operator.common.operator.resource.ImageStreamOperator;
-import io.strimzi.operator.common.operator.resource.IngressOperator;
-import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
-import io.strimzi.operator.common.operator.resource.NodeOperator;
-import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
-import io.strimzi.operator.common.operator.resource.PodOperator;
-import io.strimzi.operator.common.operator.resource.PvcOperator;
-import io.strimzi.operator.common.operator.resource.RoleBindingOperator;
-import io.strimzi.operator.common.operator.resource.RoleOperator;
-import io.strimzi.operator.common.operator.resource.RouteOperator;
-import io.strimzi.operator.common.operator.resource.SecretOperator;
-import io.strimzi.operator.common.operator.resource.ServiceAccountOperator;
-import io.strimzi.operator.common.operator.resource.ServiceOperator;
-import io.strimzi.operator.common.operator.resource.StorageClassOperator;
-import io.strimzi.operator.common.operator.resource.StrimziPodSetOperator;
 import io.vertx.core.Vertx;
 
 /**
  * Class holding the various resource operator and providers of various clients
  */
-// Deprecation is suppressed because of KafkaMirrorMaker
-@SuppressWarnings({"checkstyle:ClassDataAbstractionCoupling", "deprecation"})
+@SuppressWarnings({"checkstyle:ClassDataAbstractionCoupling"})
 public class ResourceOperatorSupplier {
     /**
      * Secret operator
@@ -79,11 +75,6 @@ public class ResourceOperatorSupplier {
      * ImageStream operator
      */
     public final ImageStreamOperator imageStreamOperations;
-
-    /**
-     * StatefulSet operator
-     */    
-    public final StatefulSetOperator stsOperations;
 
     /**
      * Config Map operator
@@ -129,11 +120,6 @@ public class ResourceOperatorSupplier {
      * KafkaConnect CR operator
      */
     public final CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> connectOperator;
-
-    /**
-     * KafkaMirrorMaker CR operator
-     */
-    public final CrdOperator<KubernetesClient, KafkaMirrorMaker, KafkaMirrorMakerList> mirrorMakerOperator;
 
     /**
      * KafkaBridge CR operator
@@ -207,11 +193,6 @@ public class ResourceOperatorSupplier {
     public final NodeOperator nodeOperator;
 
     /**
-     * ZooKeeper Scaler provider
-     */
-    public final ZookeeperScalerProvider zkScalerProvider;
-
-    /**
      * Metrics provider
      */
     public final MetricsProvider metricsProvider;
@@ -222,9 +203,9 @@ public class ResourceOperatorSupplier {
     public final AdminClientProvider adminClientProvider;
 
     /**
-     * ZooKeeper Leader finder
+     * Kafka Agent client provider
      */
-    public final ZookeeperLeaderFinder zookeeperLeaderFinder;
+    public final KafkaAgentClientProvider kafkaAgentClientProvider;
 
     /**
      * Restart Events publisher
@@ -239,7 +220,7 @@ public class ResourceOperatorSupplier {
     /**
      * Broker Scale Down operations
      */
-    public final PreventBrokerScaleDownCheck brokerScaleDownOperations;
+    public final BrokersInUseCheck brokersInUseCheck;
 
     /**
      * Constructor
@@ -248,20 +229,15 @@ public class ResourceOperatorSupplier {
      * @param client                Kubernetes Client
      * @param metricsProvider       Metrics provider
      * @param pfa                   Platform Availability Features
-     * @param operationTimeoutMs    Operation timeout in milliseconds
      * @param operatorName          Name of this operator instance
      */
-    public ResourceOperatorSupplier(Vertx vertx, KubernetesClient client, MetricsProvider metricsProvider, PlatformFeaturesAvailability pfa, long operationTimeoutMs, String operatorName) {
+    public ResourceOperatorSupplier(Vertx vertx, KubernetesClient client, MetricsProvider metricsProvider, PlatformFeaturesAvailability pfa, String operatorName) {
         this(vertx,
                 client,
-                new ZookeeperLeaderFinder(vertx,
-                        // Retry up to 3 times (4 attempts), with overall max delay of 35000ms
-                        () -> new BackOff(5_000, 2, 4)),
                 new DefaultAdminClientProvider(),
-                new DefaultZookeeperScalerProvider(),
+                new DefaultKafkaAgentClientProvider(),
                 metricsProvider,
                 pfa,
-                operationTimeoutMs,
                 new KubernetesRestartEventPublisher(client, operatorName)
         );
     }
@@ -269,48 +245,39 @@ public class ResourceOperatorSupplier {
     /**
      * Constructor used for tests
      *
-     * @param vertx                 Vert.x instance
-     * @param client                Kubernetes Client
-     * @param zlf                   ZooKeeper Leader Finder
-     * @param adminClientProvider   Kafka Admin client provider
-     * @param zkScalerProvider      ZooKeeper Scaler provider
-     * @param metricsProvider       Metrics provider
-     * @param pfa                   Platform Availability Features
-     * @param operationTimeoutMs    Operation timeout in milliseconds
+     * @param vertx                    Vert.x instance
+     * @param client                   Kubernetes Client
+     * @param adminClientProvider      Kafka Admin client provider
+     * @param kafkaAgentClientProvider Kafka Agent client provider
+     * @param metricsProvider          Metrics provider
+     * @param pfa                      Platform Availability Features
      */
     public ResourceOperatorSupplier(Vertx vertx,
                                     KubernetesClient client,
-                                    ZookeeperLeaderFinder zlf,
                                     AdminClientProvider adminClientProvider,
-                                    ZookeeperScalerProvider zkScalerProvider,
+                                    KafkaAgentClientProvider kafkaAgentClientProvider,
                                     MetricsProvider metricsProvider,
-                                    PlatformFeaturesAvailability pfa,
-                                    long operationTimeoutMs) {
+                                    PlatformFeaturesAvailability pfa) {
         this(vertx,
                 client,
-                zlf,
                 adminClientProvider,
-                zkScalerProvider,
+                kafkaAgentClientProvider,
                 metricsProvider,
                 pfa,
-                operationTimeoutMs,
                 new KubernetesRestartEventPublisher(client, "operatorName")
         );
     }
 
     private ResourceOperatorSupplier(Vertx vertx,
-                                    KubernetesClient client,
-                                    ZookeeperLeaderFinder zlf,
-                                    AdminClientProvider adminClientProvider,
-                                    ZookeeperScalerProvider zkScalerProvider,
-                                    MetricsProvider metricsProvider,
-                                    PlatformFeaturesAvailability pfa,
-                                    long operationTimeoutMs,
-                                    KubernetesRestartEventPublisher restartEventPublisher) {
+                                     KubernetesClient client,
+                                     AdminClientProvider adminClientProvider,
+                                     KafkaAgentClientProvider kafkaAgentClientProvider,
+                                     MetricsProvider metricsProvider,
+                                     PlatformFeaturesAvailability pfa,
+                                     KubernetesRestartEventPublisher restartEventPublisher) {
         this(new ServiceOperator(vertx, client),
                 pfa.hasRoutes() ? new RouteOperator(vertx, client.adapt(OpenShiftClient.class)) : null,
                 pfa.hasImages() ? new ImageStreamOperator(vertx, client.adapt(OpenShiftClient.class)) : null,
-                new StatefulSetOperator(vertx, client, operationTimeoutMs),
                 new ConfigMapOperator(vertx, client),
                 new SecretOperator(vertx, client),
                 new PvcOperator(vertx, client),
@@ -327,7 +294,6 @@ public class ResourceOperatorSupplier {
                 pfa.hasBuilds() ? new BuildOperator(vertx, client.adapt(OpenShiftClient.class)) : null,
                 new CrdOperator<>(vertx, client, Kafka.class, KafkaList.class, Kafka.RESOURCE_KIND),
                 new CrdOperator<>(vertx, client, KafkaConnect.class, KafkaConnectList.class, KafkaConnect.RESOURCE_KIND),
-                new CrdOperator<>(vertx, client, KafkaMirrorMaker.class, KafkaMirrorMakerList.class, KafkaMirrorMaker.RESOURCE_KIND),
                 new CrdOperator<>(vertx, client, KafkaBridge.class, KafkaBridgeList.class, KafkaBridge.RESOURCE_KIND),
                 new CrdOperator<>(vertx, client, KafkaConnector.class, KafkaConnectorList.class, KafkaConnector.RESOURCE_KIND),
                 new CrdOperator<>(vertx, client, KafkaMirrorMaker2.class, KafkaMirrorMaker2List.class, KafkaMirrorMaker2.RESOURCE_KIND),
@@ -336,13 +302,12 @@ public class ResourceOperatorSupplier {
                 new StrimziPodSetOperator(vertx, client),
                 new StorageClassOperator(vertx, client),
                 new NodeOperator(vertx, client),
-                zkScalerProvider,
+                kafkaAgentClientProvider,
                 metricsProvider,
                 adminClientProvider,
-                zlf,
                 restartEventPublisher,
                 new DefaultSharedEnvironmentProvider(),
-                new PreventBrokerScaleDownCheck());
+                new BrokersInUseCheck());
     }
 
     /**
@@ -351,7 +316,6 @@ public class ResourceOperatorSupplier {
      * @param serviceOperations                     Service operator
      * @param routeOperations                       Route operator
      * @param imageStreamOperations                 ImageStream operator
-     * @param stsOperations                         StatefulSet operator
      * @param configMapOperations                   ConfigMap operator
      * @param secretOperations                      Secret operator
      * @param pvcOperations                         PVC operator
@@ -368,7 +332,6 @@ public class ResourceOperatorSupplier {
      * @param buildOperations                       Build operator
      * @param kafkaOperator                         Kafka CR operator
      * @param connectOperator                       KafkaConnect CR operator
-     * @param mirrorMakerOperator                   KafkaMirrorMaker CR operator
      * @param kafkaBridgeOperator                   KafkaBridge operator
      * @param kafkaConnectorOperator                KafkaConnector operator
      * @param mirrorMaker2Operator                  KafkaMirrorMaker2 operator
@@ -377,19 +340,17 @@ public class ResourceOperatorSupplier {
      * @param strimziPodSetOperator                 StrimziPodSet operator
      * @param storageClassOperator                  StorageClass operator
      * @param nodeOperator                          Node operator
-     * @param zkScalerProvider                      ZooKeeper Scaler provider
+     * @param kafkaAgentClientProvider              Kafka Agent client provider
      * @param metricsProvider                       Metrics provider
      * @param adminClientProvider                   Kafka Admin client provider
-     * @param zookeeperLeaderFinder                 ZooKeeper Leader Finder
      * @param restartEventsPublisher                Kubernetes Events publisher
      * @param sharedEnvironmentProvider             Shared environment provider
-     * @param brokerScaleDownOperations             Broker scale down operations
+     * @param brokersInUseCheck                     Broker scale down operations
      */
     @SuppressWarnings({"checkstyle:ParameterNumber"})
     public ResourceOperatorSupplier(ServiceOperator serviceOperations,
                                     RouteOperator routeOperations,
                                     ImageStreamOperator imageStreamOperations,
-                                    StatefulSetOperator stsOperations,
                                     ConfigMapOperator configMapOperations,
                                     SecretOperator secretOperations,
                                     PvcOperator pvcOperations,
@@ -406,7 +367,6 @@ public class ResourceOperatorSupplier {
                                     BuildOperator buildOperations,
                                     CrdOperator<KubernetesClient, Kafka, KafkaList> kafkaOperator,
                                     CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> connectOperator,
-                                    CrdOperator<KubernetesClient, KafkaMirrorMaker, KafkaMirrorMakerList> mirrorMakerOperator,
                                     CrdOperator<KubernetesClient, KafkaBridge, KafkaBridgeList> kafkaBridgeOperator,
                                     CrdOperator<KubernetesClient, KafkaConnector, KafkaConnectorList> kafkaConnectorOperator,
                                     CrdOperator<KubernetesClient, KafkaMirrorMaker2, KafkaMirrorMaker2List> mirrorMaker2Operator,
@@ -415,17 +375,15 @@ public class ResourceOperatorSupplier {
                                     StrimziPodSetOperator strimziPodSetOperator,
                                     StorageClassOperator storageClassOperator,
                                     NodeOperator nodeOperator,
-                                    ZookeeperScalerProvider zkScalerProvider,
+                                    KafkaAgentClientProvider kafkaAgentClientProvider,
                                     MetricsProvider metricsProvider,
                                     AdminClientProvider adminClientProvider,
-                                    ZookeeperLeaderFinder zookeeperLeaderFinder,
                                     KubernetesRestartEventPublisher restartEventsPublisher,
                                     SharedEnvironmentProvider sharedEnvironmentProvider,
-                                    PreventBrokerScaleDownCheck brokerScaleDownOperations) {
+                                    BrokersInUseCheck brokersInUseCheck) {
         this.serviceOperations = serviceOperations;
         this.routeOperations = routeOperations;
         this.imageStreamOperations = imageStreamOperations;
-        this.stsOperations = stsOperations;
         this.configMapOperations = configMapOperations;
         this.secretOperations = secretOperations;
         this.pvcOperations = pvcOperations;
@@ -442,7 +400,6 @@ public class ResourceOperatorSupplier {
         this.buildConfigOperations = buildConfigOperations;
         this.buildOperations = buildOperations;
         this.connectOperator = connectOperator;
-        this.mirrorMakerOperator = mirrorMakerOperator;
         this.kafkaBridgeOperator = kafkaBridgeOperator;
         this.storageClassOperations = storageClassOperator;
         this.kafkaConnectorOperator = kafkaConnectorOperator;
@@ -451,12 +408,11 @@ public class ResourceOperatorSupplier {
         this.kafkaNodePoolOperator = kafkaNodePoolOperator;
         this.strimziPodSetOperator = strimziPodSetOperator;
         this.nodeOperator = nodeOperator;
-        this.zkScalerProvider = zkScalerProvider;
+        this.kafkaAgentClientProvider = kafkaAgentClientProvider;
         this.metricsProvider = metricsProvider;
         this.adminClientProvider = adminClientProvider;
-        this.zookeeperLeaderFinder = zookeeperLeaderFinder;
         this.restartEventsPublisher = restartEventsPublisher;
         this.sharedEnvironmentProvider = sharedEnvironmentProvider;
-        this.brokerScaleDownOperations = brokerScaleDownOperations;
+        this.brokersInUseCheck = brokersInUseCheck;
     }
 }

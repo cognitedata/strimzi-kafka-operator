@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 set -e
 
-if [ "$STRIMZI_KRAFT_ENABLED" = "true" ]; then
-  # Test KRaft controller process is running
-  # This is the best check we can do in a combined node until KafkaRoller is updated
-  # See proposal 046 for more details
-  . ./kafka_controller_liveness.sh
+file=/tmp/strimzi.properties
+test -f $file
+
+# During migration, the process.roles field can be still not set on broker only nodes
+# so, because grep would fail, the "|| true" operation allows to return empty roles result
+roles=$(grep -Po '(?<=^process.roles=).+' "$file" || true)
+if [[ "$roles" =~ "controller" ]] && [[ ! "$roles" =~ "broker" ]]; then
+  # For controller only mode, check if it is listening on port 9090 (configured in controller.listener.names).
+  netstat -lnt | grep -Eq 'tcp6?[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+[^ ]+:9090.*LISTEN[[:space:]]*'
 else
-  # Test ZK-based broker readiness
-  # The kafka-agent will create /var/opt/kafka/kafka-ready in the container when the broker
-  # state is >= 3 && != 127 (UNKNOWN state)
-  test -f /var/opt/kafka/kafka-ready
+  # For combined or broker only mode, check readiness via HTTP endpoint exposed by Kafka Agent.
+  # The endpoint returns 204 when broker state is 3 (RUNNING).
+  curl http://localhost:8080/v1/ready/ --fail
 fi

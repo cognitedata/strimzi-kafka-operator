@@ -6,12 +6,12 @@ package io.strimzi.operator.cluster.model.logging;
 
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ConfigMapKeySelector;
-import io.strimzi.api.kafka.model.ExternalLoggingBuilder;
-import io.strimzi.api.kafka.model.InlineLoggingBuilder;
-import io.strimzi.api.kafka.model.KafkaConnectSpec;
-import io.strimzi.api.kafka.model.KafkaConnectSpecBuilder;
-import io.strimzi.operator.common.model.InvalidResourceException;
+import io.strimzi.api.kafka.model.common.ExternalLoggingBuilder;
+import io.strimzi.api.kafka.model.common.InlineLoggingBuilder;
+import io.strimzi.api.kafka.model.connect.KafkaConnectSpec;
+import io.strimzi.api.kafka.model.connect.KafkaConnectSpecBuilder;
 import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.model.InvalidResourceException;
 import io.strimzi.operator.common.model.OrderedProperties;
 import org.junit.jupiter.api.Test;
 
@@ -39,8 +39,6 @@ public class LoggingUtilsTest {
                 log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} %p %X{connector.context}%m (%c) [%t]%n
                 connect.root.logger.level=INFO
                 log4j.rootLogger=${connect.root.logger.level}, CONSOLE
-                log4j.logger.org.apache.zookeeper=ERROR
-                log4j.logger.org.I0Itec.zkclient=ERROR
                 log4j.logger.org.reflections=ERROR
                 """));
     }
@@ -93,8 +91,6 @@ public class LoggingUtilsTest {
                 log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} %p %X{connector.context}%m (%c) [%t]%n
                 connect.root.logger.level=INFO
                 log4j.rootLogger=${connect.root.logger.level}, CONSOLE
-                log4j.logger.org.apache.zookeeper=ERROR
-                log4j.logger.org.I0Itec.zkclient=ERROR
                 log4j.logger.org.reflections=ERROR
                 """));
     }
@@ -114,8 +110,6 @@ public class LoggingUtilsTest {
                 log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} %p %X{connector.context}%m (%c) [%t]%n
                 connect.root.logger.level=INFO
                 log4j.rootLogger=${connect.root.logger.level}, CONSOLE
-                log4j.logger.org.apache.zookeeper=ERROR
-                log4j.logger.org.I0Itec.zkclient=ERROR
                 log4j.logger.org.reflections=ERROR
                 
                 monitorInterval=30
@@ -143,8 +137,6 @@ public class LoggingUtilsTest {
                 log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} %p %X{connector.context}%m (%c) [%t]%n
                 connect.root.logger.level=INFO
                 log4j.rootLogger=${connect.root.logger.level}, CONSOLE
-                log4j.logger.org.apache.zookeeper=ERROR
-                log4j.logger.org.I0Itec.zkclient=ERROR
                 log4j.logger.org.reflections=DEBUG
                 logger.myclass.level=TRACE
                 """));
@@ -171,8 +163,6 @@ public class LoggingUtilsTest {
                 log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} %p %X{connector.context}%m (%c) [%t]%n
                 connect.root.logger.level=INFO
                 log4j.rootLogger=${connect.root.logger.level}, CONSOLE
-                log4j.logger.org.apache.zookeeper=ERROR
-                log4j.logger.org.I0Itec.zkclient=ERROR
                 log4j.logger.org.reflections=DEBUG
                 logger.myclass.level=TRACE
                 
@@ -200,8 +190,8 @@ public class LoggingUtilsTest {
                                 log4j.appender.CONSOLE=org.apache.log4j.ConsoleAppender
                                 log4j.appender.CONSOLE.layout=org.apache.log4j.PatternLayout
                                 log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} %p %m (%c) [%t]%n
-                                zookeeper.root.logger=INFO
-                                log4j.rootLogger=${zookeeper.root.logger}, CONSOLE
+                                kafka.root.logger=INFO
+                                log4j.rootLogger=${kafka.root.logger}, CONSOLE
                                 """))
                         .build()
         );
@@ -210,8 +200,8 @@ public class LoggingUtilsTest {
                 log4j.appender.CONSOLE=org.apache.log4j.ConsoleAppender
                 log4j.appender.CONSOLE.layout=org.apache.log4j.PatternLayout
                 log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} %p %m (%c) [%t]%n
-                zookeeper.root.logger=INFO
-                log4j.rootLogger=${zookeeper.root.logger}, CONSOLE
+                kafka.root.logger=INFO
+                log4j.rootLogger=${kafka.root.logger}, CONSOLE
                 """));
     }
 
@@ -235,8 +225,8 @@ public class LoggingUtilsTest {
                                 log4j.appender.CONSOLE=org.apache.log4j.ConsoleAppender
                                 log4j.appender.CONSOLE.layout=org.apache.log4j.PatternLayout
                                 log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} %p %m (%c) [%t]%n
-                                zookeeper.root.logger=INFO
-                                log4j.rootLogger=${zookeeper.root.logger}, CONSOLE
+                                kafka.root.logger=INFO
+                                log4j.rootLogger=${kafka.root.logger}, CONSOLE
                                 """))
                         .build()
         );
@@ -245,8 +235,8 @@ public class LoggingUtilsTest {
                 log4j.appender.CONSOLE=org.apache.log4j.ConsoleAppender
                 log4j.appender.CONSOLE.layout=org.apache.log4j.PatternLayout
                 log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} %p %m (%c) [%t]%n
-                zookeeper.root.logger=INFO
-                log4j.rootLogger=${zookeeper.root.logger}, CONSOLE
+                kafka.root.logger=INFO
+                log4j.rootLogger=${kafka.root.logger}, CONSOLE
                                 
                 monitorInterval=30
                 """));

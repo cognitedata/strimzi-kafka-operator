@@ -93,11 +93,6 @@ prepare:
     script: |
       ./.azure/scripts/setup-helm.sh
 
-  - name: Setup upgrade
-    how: shell
-    script: |
-      ./.azure/scripts/setup_upgrade.sh
-
   - name: Install shellcheck
     how: shell
     script: |
@@ -119,14 +114,36 @@ prepare:
         HOST="myregistry.local"
       fi
       export MVN_ARGS="-B -DskipTests -Dmaven.javadoc.skip=true --no-transfer-progress"
+
+      # Setup local registry for building images and connect image
       export DOCKER_REGISTRY="${HOST}:5001"
       export DOCKER_ORG="strimzi"
       export DOCKER_TAG="test"
-      
+
       make java_install
-      make docker_build
-      make docker_tag
-      make docker_push
+
+      # Build images only for non-release triggers
+      if [[ ${RELEASE:-False} != True ]]; then
+        make docker_build
+        make docker_tag
+        make docker_push
+      fi
+
+      # Get latest Kafka version from kafka-versions.yaml
+      export KAFKA_VERSION=$(cat kafka-versions.yaml | yq eval '.[] | select(.default) | .version' -)
+      # Set env var for KafkaConnect build image to avoid building images
+      export CONNECT_IMAGE_WITH_FILE_SINK_PLUGIN="${DOCKER_REGISTRY}/${DOCKER_ORG}/connect-file-sink:latest"
+      # Build base image from previous data
+      # Set quay and release tag in case the pipeline is triggered by release
+      if [[ ${RELEASE} == True ]]; then
+        export BASE_IMAGE="quay.io/strimzi/kafka:${PACKIT_TAG_NAME}-kafka-KAFKA_VERSION"
+      else
+        export BASE_IMAGE="${DOCKER_REGISTRY}/${DOCKER_ORG}/kafka:${DOCKER_TAG}-kafka-KAFKA_VERSION"
+      fi
+
+      # Build the connect image
+      eval $(./systemtest/src/test/resources/connect-build/build-connect-image.sh "$KAFKA_VERSION" "$BASE_IMAGE" "$CONNECT_IMAGE_WITH_FILE_SINK_PLUGIN")
+      docker push $CONNECT_IMAGE_WITH_FILE_SINK_PLUGIN
 
 # Discover tmt defined tests in tests/ folder
 execute:
@@ -139,10 +156,10 @@ finish:
 #######################################################################
 
 /smoke:
-  summary: Run smoke strimzi test suite
+  summary: Run smoke strimzi test suite with kraft
   provision:
     hardware:
-      memory: ">= 8 GiB"
+      memory: ">= 12 GiB"
       cpu:
         processors: ">= 4"
   discover+:
@@ -150,31 +167,25 @@ finish:
       - smoke
 
 /regression-operators:
-  summary: Run regression strimzi test suite
+  summary: Run regression strimzi test suite with kraft
   discover+:
     test:
       - regression-operators
 
-/regression-components:
-  summary: Run regression strimzi test suite
+/regression-brokers-and-security:
+  summary: Run regression strimzi test suite with kraft
   discover+:
     test:
-      - regression-components
+      - regression-brokers-and-security
 
-/kraft-operators:
-  summary: Run regression kraft strimzi test suite
+/regression-operands:
+  summary: Run regression strimzi test suite with kraft
   discover+:
     test:
-      - kraft-operators
-
-/kraft-components:
-  summary: Run regression kraft strimzi test suite
-  discover+:
-    test:
-      - kraft-components
+      - regression-operands
 
 /acceptance:
-  summary: Run acceptance strimzi test suite
+  summary: Run acceptance strimzi test suite with kraft
   provision:
     hardware:
       memory: ">= 24 GiB"
@@ -185,7 +196,7 @@ finish:
       - acceptance
 
 /sanity:
-  summary: Run sanity strimzi test suite
+  summary: Run sanity strimzi test suite with kraft
   provision:
     hardware:
       memory: ">= 16 GiB"
@@ -196,12 +207,32 @@ finish:
       - sanity
 
 /upgrade:
-  summary: Run upgrade strimzi test suite
+  summary: Run upgrade strimzi test suite with kraft
   provision:
     hardware:
-      memory: ">= 8 GiB"
+      memory: ">= 12 GiB"
       cpu:
         processors: ">= 4"
   discover+:
     test:
       - upgrade
+
+/performance:
+  summary: Run performance test suite with kraft
+  discover+:
+    test:
+      - performance
+
+/capacity:
+  summary: Run performance capacity test suite with kraft
+  provision:
+    hardware:
+      memory: ">= 30 GiB"
+      cpu:
+        processors: ">= 8"
+      # it seems that default disk size (i.e., 50GB) is not enough for capacity tests
+      disk:
+        - size: ">= 60 GB"
+  discover+:
+    test:
+      - capacity

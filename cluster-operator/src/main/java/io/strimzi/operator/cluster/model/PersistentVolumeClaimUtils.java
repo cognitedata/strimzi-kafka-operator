@@ -9,12 +9,11 @@ import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaimBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
-import io.strimzi.api.kafka.model.storage.JbodStorage;
-import io.strimzi.api.kafka.model.storage.PersistentClaimStorage;
-import io.strimzi.api.kafka.model.storage.PersistentClaimStorageOverride;
-import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
-import io.strimzi.api.kafka.model.storage.Storage;
-import io.strimzi.api.kafka.model.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.common.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.kafka.JbodStorage;
+import io.strimzi.api.kafka.model.kafka.PersistentClaimStorage;
+import io.strimzi.api.kafka.model.kafka.SingleVolumeStorage;
+import io.strimzi.api.kafka.model.kafka.Storage;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
@@ -31,7 +30,7 @@ import java.util.Set;
  */
 public class PersistentVolumeClaimUtils {
     /**
-     * Creates list of PersistentVolumeClaims required by stateful deployments (Kafka and Zoo). This method calls itself
+     * Creates list of PersistentVolumeClaims required by stateful deployments (Kafka). This method calls itself
      * recursively to handle volumes inside JBOD storage. When it calls itself to handle the volumes inside JBOD array,
      * the {@code jbod} flag should be set to {@code true}. When called from outside, it should be set to {@code false}.
      *
@@ -61,7 +60,7 @@ public class PersistentVolumeClaimUtils {
                 String namePrefix = VolumeUtils.createVolumePrefix(persistentStorage.getId(), jbod);
 
                 for (NodeRef node : nodes) {
-                    pvcs.add(createPersistentVolumeClaim(namePrefix + "-" + node.podName(), namespace, node.nodeId(), persistentStorage, labels, ownerReference, template));
+                    pvcs.add(createPersistentVolumeClaim(namePrefix + "-" + node.podName(), namespace, persistentStorage, labels, ownerReference, template));
                 }
             } else if (storage instanceof JbodStorage jbodStorage) {
                 for (SingleVolumeStorage volume : jbodStorage.getVolumes()) {
@@ -75,41 +74,10 @@ public class PersistentVolumeClaimUtils {
     }
 
     /**
-     * Gets the storage class configured for given PVC. This either the regularly configured storage class or the
-     * storage class from the per-broker configuration overrides. If not storage class is specified, it returns null
-     * and the default storage class will be used.
-     *
-     * @param brokerId          ID of the broker to which this PVC belongs. It is used to find configuration overrides
-     *                          for Storage class.
-     * @param storage           The user supplied configuration of the PersistentClaimStorage
-     *
-     * @return  Storage class which should be used for this PVC
-     */
-    private static String storageClassNameForBrokerId(int brokerId, PersistentClaimStorage storage)    {
-        String storageClass = storage.getStorageClass();
-
-        if (storage.getOverrides() != null) {
-            storageClass = storage.getOverrides().stream()
-                    .filter(broker -> broker != null
-                            && broker.getBroker() != null
-                            && broker.getBroker() == brokerId
-                            && broker.getStorageClass() != null)
-                    .map(PersistentClaimStorageOverride::getStorageClass)
-                    .findAny()
-                    // if none are found for broker do not change storage class from overrides
-                    .orElse(storageClass);
-        }
-
-        return storageClass;
-    }
-
-    /**
      * Generates a persistent volume claim for a given broker ID.
      *
      * @param name              Name of the PVC
      * @param namespace         Namespace of the PVC
-     * @param brokerId          ID of the broker to which this PVC belongs. It is used to find configuration
-     *                          overrides for Storage class.
      * @param storage           The user supplied configuration of the PersistentClaimStorage
      * @param labels            Labels of the PVC
      * @param ownerReference    OwnerReference of the PVC
@@ -120,7 +88,6 @@ public class PersistentVolumeClaimUtils {
     private static PersistentVolumeClaim createPersistentVolumeClaim(
             String name,
             String namespace,
-            int brokerId,
             PersistentClaimStorage storage,
             Labels labels,
             OwnerReference ownerReference,
@@ -146,7 +113,7 @@ public class PersistentVolumeClaimUtils {
                     .withNewResources()
                         .withRequests(requests)
                     .endResources()
-                    .withStorageClassName(storageClassNameForBrokerId(brokerId, storage))
+                    .withStorageClassName(storage.getStorageClass())
                     .withSelector(storageSelector)
                     .withVolumeMode("Filesystem")
                 .endSpec()

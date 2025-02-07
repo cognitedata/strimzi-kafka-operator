@@ -10,26 +10,26 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.openshift.api.model.Build;
-import io.strimzi.api.kafka.model.KafkaConnectResources;
+import io.strimzi.api.kafka.model.connect.KafkaConnectResources;
 import io.strimzi.api.kafka.model.connect.build.Output;
-import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
+import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.model.ImagePullPolicy;
 import io.strimzi.operator.cluster.model.KafkaConnectBuild;
 import io.strimzi.operator.cluster.model.KafkaConnectBuildUtils;
 import io.strimzi.operator.cluster.model.KafkaConnectDockerfile;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.BuildConfigOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.BuildOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ConfigMapOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ImageStreamOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.PodOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ServiceAccountOperator;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.InvalidConfigurationException;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
-import io.strimzi.operator.common.operator.resource.BuildConfigOperator;
-import io.strimzi.operator.common.operator.resource.BuildOperator;
-import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
-import io.strimzi.operator.common.operator.resource.ImageStreamOperator;
-import io.strimzi.operator.common.operator.resource.PodOperator;
-import io.strimzi.operator.common.operator.resource.ServiceAccountOperator;
 import io.vertx.core.Future;
 
 import java.util.List;
@@ -118,7 +118,7 @@ public class ConnectBuildOperator {
             // Extract information from the current controllerResource. This is used to figure out if new build needs to be run or not.
             currentBuildRevision = Annotations.stringAnnotation(controllerResource, Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null);
             currentImage = Annotations.stringAnnotation(controllerResource, Annotations.STRIMZI_IO_CONNECT_BUILD_IMAGE, null);
-            forceRebuild = Annotations.hasAnnotation(controllerResource, Annotations.STRIMZI_IO_CONNECT_FORCE_REBUILD);
+            forceRebuild = Annotations.booleanAnnotation(controllerResource, Annotations.STRIMZI_IO_CONNECT_FORCE_REBUILD, false);
         }
 
         KafkaConnectDockerfile dockerfile = connectBuild.generateDockerfile();
@@ -212,10 +212,10 @@ public class ConnectBuildOperator {
     /**
      * Checks if the builder Pod finished the build
      *
-     @param namespace               Namespace of the Connect cluster
-     * @param podName               The name of the Pod which should be checked whether it finished
+     * @param namespace     Namespace of the Connect cluster
+     * @param podName       The name of the Pod which should be checked whether it finished
      *
-     * @return                      True if the build already finished, false if it is still building
+     * @return      True if the build already finished, false if it is still building
      */
     private boolean kubernetesBuildPodFinished(String namespace, String podName, String containerName)   {
         Pod buildPod = podOperator.get(namespace, podName);

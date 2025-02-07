@@ -5,7 +5,6 @@
 package io.strimzi.operator.cluster;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import io.fabric8.kubernetes.api.model.rbac.ClusterRole;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import io.strimzi.certs.OpenSslCertManager;
@@ -15,18 +14,13 @@ import io.strimzi.operator.cluster.operator.assembly.KafkaAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaBridgeAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaConnectAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaMirrorMaker2AssemblyOperator;
-import io.strimzi.operator.cluster.operator.assembly.KafkaMirrorMakerAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaRebalanceAssemblyOperator;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.common.MetricsProvider;
 import io.strimzi.operator.common.MicrometerMetricsProvider;
 import io.strimzi.operator.common.OperatorKubernetesClientBuilder;
-import io.strimzi.operator.common.model.PasswordGenerator;
-import io.strimzi.operator.common.Reconciliation;
-import io.strimzi.operator.common.ShutdownHook;
 import io.strimzi.operator.common.Util;
-import io.strimzi.operator.common.operator.resource.ClusterRoleOperator;
-import io.strimzi.operator.common.operator.resource.ReconcileResult;
+import io.strimzi.operator.common.model.PasswordGenerator;
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
@@ -35,21 +29,14 @@ import io.vertx.core.VertxOptions;
 import io.vertx.core.http.HttpServer;
 import io.vertx.micrometer.MicrometerMetricsOptions;
 import io.vertx.micrometer.VertxPrometheusOptions;
+import io.vertx.micrometer.backends.BackendRegistries;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.security.Security;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
 /**
  * The main class used to start the Strimzi Cluster Operator
@@ -91,11 +78,10 @@ public class Main {
         shutdownHook.register(() -> ShutdownHook.shutdownVertx(vertx, SHUTDOWN_TIMEOUT));
 
         // Setup Micrometer Metrics provider
-        MetricsProvider metricsProvider = new MicrometerMetricsProvider();
+        MetricsProvider metricsProvider = new MicrometerMetricsProvider(BackendRegistries.getDefaultNow());
         KubernetesClient client = new OperatorKubernetesClientBuilder("strimzi-cluster-operator", strimziVersion).build();
 
-        maybeCreateClusterRoles(vertx, config, client)
-                .compose(i -> startHealthServer(vertx, metricsProvider))
+        startHealthServer(vertx, metricsProvider)
                 .compose(i -> leaderElection(client, config, shutdownHook))
                 .compose(i -> createPlatformFeaturesAvailability(vertx, client))
                 .compose(pfa -> deployClusterOperatorVerticles(vertx, client, metricsProvider, pfa, config, shutdownHook))
@@ -151,7 +137,6 @@ public class Main {
                 client,
                 metricsProvider,
                 pfa,
-                config.getOperationTimeoutMs(),
                 config.getOperatorName()
         );
 
@@ -161,7 +146,6 @@ public class Main {
         KafkaAssemblyOperator kafkaClusterOperations = null;
         KafkaConnectAssemblyOperator kafkaConnectClusterOperations = null;
         KafkaMirrorMaker2AssemblyOperator kafkaMirrorMaker2AssemblyOperator = null;
-        KafkaMirrorMakerAssemblyOperator kafkaMirrorMakerAssemblyOperator = null;
         KafkaBridgeAssemblyOperator kafkaBridgeAssemblyOperator = null;
         KafkaRebalanceAssemblyOperator kafkaRebalanceAssemblyOperator = null;
 
@@ -177,7 +161,6 @@ public class Main {
             kafkaClusterOperations = new KafkaAssemblyOperator(vertx, pfa, certManager, passwordGenerator, resourceOperatorSupplier, config);
             kafkaConnectClusterOperations = new KafkaConnectAssemblyOperator(vertx, pfa, resourceOperatorSupplier, config);
             kafkaMirrorMaker2AssemblyOperator = new KafkaMirrorMaker2AssemblyOperator(vertx, pfa, resourceOperatorSupplier, config);
-            kafkaMirrorMakerAssemblyOperator = new KafkaMirrorMakerAssemblyOperator(vertx, pfa, certManager, passwordGenerator, resourceOperatorSupplier, config);
             kafkaBridgeAssemblyOperator = new KafkaBridgeAssemblyOperator(vertx, pfa, certManager, passwordGenerator, resourceOperatorSupplier, config);
             kafkaRebalanceAssemblyOperator = new KafkaRebalanceAssemblyOperator(vertx, resourceOperatorSupplier, config);
         }
@@ -190,26 +173,24 @@ public class Main {
                     config,
                     kafkaClusterOperations,
                     kafkaConnectClusterOperations,
-                    kafkaMirrorMakerAssemblyOperator,
                     kafkaMirrorMaker2AssemblyOperator,
                     kafkaBridgeAssemblyOperator,
                     kafkaRebalanceAssemblyOperator,
                     resourceOperatorSupplier);
-            vertx.deployVerticle(operator,
-                res -> {
-                    if (res.succeeded()) {
-                        shutdownHook.register(() -> ShutdownHook.undeployVertxVerticle(vertx, res.result(), SHUTDOWN_TIMEOUT));
+            vertx.deployVerticle(operator).onComplete(res -> {
+                if (res.succeeded()) {
+                    shutdownHook.register(() -> ShutdownHook.undeployVertxVerticle(vertx, res.result(), SHUTDOWN_TIMEOUT));
 
-                        if (config.getCustomResourceSelector() != null) {
-                            LOGGER.info("Cluster Operator verticle started in namespace {} with label selector {}", namespace, config.getCustomResourceSelector());
-                        } else {
-                            LOGGER.info("Cluster Operator verticle started in namespace {} without label selector", namespace);
-                        }
+                    if (config.getCustomResourceSelector() != null) {
+                        LOGGER.info("Cluster Operator verticle started in namespace {} with label selector {}", namespace, config.getCustomResourceSelector());
                     } else {
-                        LOGGER.error("Cluster Operator verticle in namespace {} failed to start", namespace, res.cause());
+                        LOGGER.info("Cluster Operator verticle started in namespace {} without label selector", namespace);
                     }
-                    prom.handle(res);
-                });
+                } else {
+                    LOGGER.error("Cluster Operator verticle in namespace {} failed to start", namespace, res.cause());
+                }
+                prom.handle(res);
+            });
         }
         return Future.join(futures);
     }
@@ -264,60 +245,6 @@ public class Main {
     }
 
     /**
-     * If enabled in the configuration, it creates the cluster roles used by the operator
-     *
-     * @param vertx             Vertx instance
-     * @param config            Cluster Operator configuration
-     * @param client            Kubernetes client instance
-     *
-     * @return  Future which completes when the Cluster Roles are created
-     *                  (or - if their creation is not enabled - it just completes without doing anything).
-     */
-    /*test*/ static Future<Void> maybeCreateClusterRoles(Vertx vertx, ClusterOperatorConfig config, KubernetesClient client)  {
-        if (config.isCreateClusterRoles()) {
-            List<Future<ReconcileResult<ClusterRole>>> futures = new ArrayList<>();
-            ClusterRoleOperator cro = new ClusterRoleOperator(vertx, client);
-
-            Map<String, String> clusterRoles = new HashMap<>(6);
-            clusterRoles.put("strimzi-cluster-operator-namespaced", "020-ClusterRole-strimzi-cluster-operator-role.yaml");
-            clusterRoles.put("strimzi-cluster-operator-global", "021-ClusterRole-strimzi-cluster-operator-role.yaml");
-            clusterRoles.put("strimzi-kafka-broker", "030-ClusterRole-strimzi-kafka-broker.yaml");
-            clusterRoles.put("strimzi-entity-operator", "031-ClusterRole-strimzi-entity-operator.yaml");
-            clusterRoles.put("strimzi-kafka-client", "033-ClusterRole-strimzi-kafka-client.yaml");
-
-            for (Map.Entry<String, String> clusterRole : clusterRoles.entrySet()) {
-                LOGGER.info("Creating cluster role {}", clusterRole.getKey());
-
-                try (BufferedReader br = new BufferedReader(
-                        new InputStreamReader(Objects.requireNonNull(Main.class.getResourceAsStream("/cluster-roles/" + clusterRole.getValue())),
-                                StandardCharsets.UTF_8))) {
-                    String yaml = br.lines().collect(Collectors.joining(System.lineSeparator()));
-                    ClusterRole role = ClusterRoleOperator.convertYamlToClusterRole(yaml);
-                    Future<ReconcileResult<ClusterRole>> fut = cro.reconcile(new Reconciliation("start-cluster-operator", "Deployment", config.getOperatorNamespace(), "cluster-operator"), role.getMetadata().getName(), role);
-                    futures.add(fut);
-                } catch (IOException e) {
-                    LOGGER.error("Failed to create Cluster Roles.", e);
-                    throw new RuntimeException(e);
-                }
-
-            }
-
-            Promise<Void> returnPromise = Promise.promise();
-            Future.all(futures).onComplete(res -> {
-                if (res.succeeded())    {
-                    returnPromise.complete();
-                } else  {
-                    returnPromise.fail("Failed to create Cluster Roles.");
-                }
-            });
-
-            return returnPromise.future();
-        } else {
-            return Future.succeededFuture();
-        }
-    }
-
-    /**
      * Start an HTTP health and metrics server
      *
      * @param vertx             Vertx instance
@@ -336,11 +263,13 @@ public class Main {
                         request.response().setStatusCode(204).end();
                     } else if (request.path().equals("/metrics")) {
                         PrometheusMeterRegistry metrics = (PrometheusMeterRegistry) metricsProvider.meterRegistry();
-                        request.response().setStatusCode(200)
+                        request.response()
+                                .putHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                                .setStatusCode(200)
                                 .end(metrics.scrape());
                     }
                 })
-                .listen(HEALTH_SERVER_PORT, ar -> {
+                .listen(HEALTH_SERVER_PORT).onComplete(ar -> {
                     if (ar.succeeded()) {
                         LOGGER.info("Health and metrics server is ready on port {})", HEALTH_SERVER_PORT);
                     } else {

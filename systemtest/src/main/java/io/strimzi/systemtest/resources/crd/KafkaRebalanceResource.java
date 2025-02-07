@@ -8,9 +8,8 @@ import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.Crds;
-import io.strimzi.api.kafka.KafkaRebalanceList;
-import io.strimzi.api.kafka.model.KafkaRebalance;
-import io.strimzi.api.kafka.model.balancing.KafkaRebalanceState;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalance;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceList;
 import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.ResourceType;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaRebalanceUtils;
@@ -47,14 +46,14 @@ public class KafkaRebalanceResource implements ResourceType<KafkaRebalance> {
 
     @Override
     public boolean waitForReadiness(KafkaRebalance resource) {
-        return KafkaRebalanceUtils.waitForKafkaRebalanceCustomResourceState(resource.getMetadata().getNamespace(), resource.getMetadata().getName(), KafkaRebalanceState.PendingProposal);
-    }
+        return KafkaRebalanceUtils.waitForKafkaRebalanceReadiness(resource);
+    };
 
     public static MixedOperation<KafkaRebalance, KafkaRebalanceList, Resource<KafkaRebalance>> kafkaRebalanceClient() {
         return Crds.kafkaRebalanceOperation(ResourceManager.kubeClient().getClient());
     }
 
-    public static void replaceKafkaRebalanceResourceInSpecificNamespace(String resourceName, Consumer<KafkaRebalance> editor, String namespaceName) {
-        ResourceManager.replaceCrdResource(KafkaRebalance.class, KafkaRebalanceList.class, resourceName, editor, namespaceName);
+    public static void replaceKafkaRebalanceResourceInSpecificNamespace(String namespaceName, String resourceName, Consumer<KafkaRebalance> editor) {
+        ResourceManager.replaceCrdResource(namespaceName, KafkaRebalance.class, KafkaRebalanceList.class, resourceName, editor);
     }
 }

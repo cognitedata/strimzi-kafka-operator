@@ -4,8 +4,9 @@
  */
 package io.strimzi.systemtest;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import io.fabric8.kubernetes.api.model.Service;
 import io.strimzi.systemtest.enums.ClusterOperatorInstallType;
 import io.strimzi.systemtest.utils.TestKafkaVersion;
@@ -19,8 +20,12 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -35,7 +40,7 @@ public class Environment {
 
     private static final Logger LOGGER = LogManager.getLogger(Environment.class);
     private static final Map<String, String> VALUES = new HashMap<>();
-    private static final JsonNode JSON_DATA = loadConfigurationFile();
+    private static final Map<String, Object> YAML_DATA = loadConfigurationFile();
 
     /**
      * Specify the system test configuration file path from an environmental variable
@@ -62,7 +67,6 @@ public class Environment {
      * Specify Kafka client app images used in system tests.
      */
     private static final String TEST_CLIENTS_IMAGE_ENV = "TEST_CLIENTS_IMAGE";
-    private static final String TEST_ADMIN_IMAGE_ENV = "TEST_ADMIN_IMAGE";
     private static final String TEST_CLIENTS_VERSION_ENV = "TEST_CLIENTS_VERSION";
 
     private static final String SCRAPER_IMAGE_ENV = "SCRAPER_IMAGE";
@@ -75,6 +79,7 @@ public class Environment {
      * Directory for store logs collected during the tests.
      */
     private static final String TEST_LOG_DIR_ENV = "TEST_LOG_DIR";
+    private static final String PERFORMANCE_DIR_ENV = "PERFORMANCE_DIR";
     /**
      * Kafka version used in images during the system tests.
      */
@@ -111,7 +116,7 @@ public class Environment {
     private static final String OLM_SOURCE_NAME_ENV = "OLM_SOURCE_NAME";
     private static final String OLM_SOURCE_NAMESPACE_ENV = "OLM_SOURCE_NAMESPACE";
     private static final String OLM_APP_BUNDLE_PREFIX_ENV = "OLM_APP_BUNDLE_PREFIX";
-    private static final String OLM_OPERATOR_VERSION_ENV = "OLM_OPERATOR_VERSION";
+    private static final String OLM_OPERATOR_CHANNEL_ENV = "OLM_OPERATOR_CHANNEL";
     /**
      * Allows network policies
      */
@@ -160,20 +165,30 @@ public class Environment {
     public static final String CONNECT_IMAGE_WITH_FILE_SINK_PLUGIN = getOrDefault(CONNECT_IMAGE_WITH_FILE_SINK_PLUGIN_ENV, "");
 
     /**
+     * Env var for specify base image for building Kafka with tiered storage in system tests
+     */
+    public static final String KAFKA_TIERED_STORAGE_BASE_IMAGE_ENV = "KAFKA_TIERED_STORAGE_BASE_IMAGE";
+    public static final String KANIKO_IMAGE_ENV = "KANIKO_IMAGE";
+
+    public static final String POSTGRES_IMAGE_ENV = "POSTGRES_IMAGE";
+
+    /**
      * Defaults
      */
-    public static final String STRIMZI_ORG_DEFAULT = "strimzi";
     public static final String STRIMZI_TAG_DEFAULT = "latest";
+    public static final String STRIMZI_ORG_DEFAULT = "strimzi";
     public static final String STRIMZI_REGISTRY_DEFAULT = "quay.io";
     public static final String TEST_CLIENTS_ORG_DEFAULT = "strimzi-test-clients";
     private static final String TEST_LOG_DIR_DEFAULT = TestUtils.USER_PATH + "/../systemtest/target/logs/";
+    private static final String PERFORMANCE_DIR_DEFAULT = TestUtils.USER_PATH + "/../systemtest/target/performance/";
     private static final String STRIMZI_LOG_LEVEL_DEFAULT = "DEBUG";
-    public static final String COMPONENTS_IMAGE_PULL_POLICY_ENV_DEFAULT = Constants.IF_NOT_PRESENT_IMAGE_PULL_POLICY;
-    public static final String OPERATOR_IMAGE_PULL_POLICY_ENV_DEFAULT = Constants.ALWAYS_IMAGE_PULL_POLICY;
+    public static final String COMPONENTS_IMAGE_PULL_POLICY_ENV_DEFAULT = TestConstants.IF_NOT_PRESENT_IMAGE_PULL_POLICY;
+    public static final String OPERATOR_IMAGE_PULL_POLICY_ENV_DEFAULT = TestConstants.ALWAYS_IMAGE_PULL_POLICY;
     public static final String OLM_OPERATOR_NAME_DEFAULT = "strimzi-kafka-operator";
-    public static final String OLM_OPERATOR_DEPLOYMENT_NAME_DEFAULT = Constants.STRIMZI_DEPLOYMENT_NAME;
+    public static final String OLM_OPERATOR_DEPLOYMENT_NAME_DEFAULT = TestConstants.STRIMZI_DEPLOYMENT_NAME;
     public static final String OLM_SOURCE_NAME_DEFAULT = "community-operators";
     public static final String OLM_APP_BUNDLE_PREFIX_DEFAULT = "strimzi-cluster-operator";
+    public static final String OLM_OPERATOR_CHANNEL_DEFAULT = "stable";
     private static final boolean DEFAULT_TO_DENY_NETWORK_POLICIES_DEFAULT = true;
     private static final ClusterOperatorInstallType CLUSTER_OPERATOR_INSTALL_TYPE_DEFAULT = ClusterOperatorInstallType.BUNDLE;
     private static final boolean LB_FINALIZERS_DEFAULT = false;
@@ -181,24 +196,28 @@ public class Environment {
     private static final String RESOURCE_ALLOCATION_STRATEGY_DEFAULT = "SHARE_MEMORY_FOR_ALL_COMPONENTS";
 
     private static final String ST_KAFKA_VERSION_DEFAULT = TestKafkaVersion.getDefaultSupportedKafkaVersion();
-    private static final String ST_CLIENTS_KAFKA_VERSION_DEFAULT = "3.6.0";
-    public static final String TEST_CLIENTS_VERSION_DEFAULT = "0.6.0";
+    private static final String ST_CLIENTS_KAFKA_VERSION_DEFAULT = "3.9.0";
+    public static final String TEST_CLIENTS_VERSION_DEFAULT = "0.10.0";
     public static final String ST_FILE_PLUGIN_URL_DEFAULT = "https://repo1.maven.org/maven2/org/apache/kafka/connect-file/" + ST_KAFKA_VERSION_DEFAULT + "/connect-file-" + ST_KAFKA_VERSION_DEFAULT + ".jar";
-    public static final String OLM_OPERATOR_VERSION_DEFAULT = "0.38.0";
 
     public static final String IP_FAMILY_DEFAULT = "ipv4";
     public static final String IP_FAMILY_VERSION_6 = "ipv6";
     public static final String IP_FAMILY_DUAL_STACK = "dual";
 
+    public static final String KAFKA_TIERED_STORAGE_BASE_IMAGE_DEFAULT = STRIMZI_REGISTRY_DEFAULT + "/" + STRIMZI_ORG_DEFAULT + "/kafka:latest-kafka-" + ST_KAFKA_VERSION_DEFAULT;
+    public static final String KANIKO_IMAGE_DEFAULT = "gcr.io/kaniko-project/executor:v1.23.2";
+
+    public static final String POSTGRES_IMAGE_DEFAULT = "postgres:latest";
+
     /**
      * Set values
      */
-    private static String config;
     public static final String SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET = getOrDefault(STRIMZI_IMAGE_PULL_SECRET_ENV, "");
-    public static final String STRIMZI_ORG = getOrDefault(STRIMZI_ORG_ENV, STRIMZI_ORG_DEFAULT);
-    public static final String STRIMZI_TAG = getOrDefault(STRIMZI_TAG_ENV, STRIMZI_TAG_DEFAULT);
-    public static final String STRIMZI_REGISTRY = getOrDefault(STRIMZI_REGISTRY_ENV, STRIMZI_REGISTRY_DEFAULT);
+    public static final String STRIMZI_ORG = getOrDefault(STRIMZI_ORG_ENV, "");
+    public static final String STRIMZI_TAG = getOrDefault(STRIMZI_TAG_ENV, "");
+    public static final String STRIMZI_REGISTRY = getOrDefault(STRIMZI_REGISTRY_ENV, "");
     public static final String TEST_LOG_DIR = getOrDefault(TEST_LOG_DIR_ENV, TEST_LOG_DIR_DEFAULT);
+    public static final String PERFORMANCE_DIR = getOrDefault(PERFORMANCE_DIR_ENV, PERFORMANCE_DIR_DEFAULT);
     public static final String ST_KAFKA_VERSION = getOrDefault(ST_KAFKA_VERSION_ENV, ST_KAFKA_VERSION_DEFAULT);
     public static final String CLIENTS_KAFKA_VERSION = getOrDefault(CLIENTS_KAFKA_VERSION_ENV, ST_CLIENTS_KAFKA_VERSION_DEFAULT);
     public static final String STRIMZI_LOG_LEVEL = getOrDefault(STRIMZI_LOG_LEVEL_ENV, STRIMZI_LOG_LEVEL_DEFAULT);
@@ -210,7 +229,9 @@ public class Environment {
     private static final String TEST_CLIENTS_VERSION = getOrDefault(TEST_CLIENTS_VERSION_ENV, TEST_CLIENTS_VERSION_DEFAULT);
     private static final String TEST_CLIENTS_IMAGE_DEFAULT = STRIMZI_REGISTRY_DEFAULT + "/" + TEST_CLIENTS_ORG_DEFAULT + "/test-clients:" + TEST_CLIENTS_VERSION + "-kafka-" + CLIENTS_KAFKA_VERSION;
     public static final String TEST_CLIENTS_IMAGE = getOrDefault(TEST_CLIENTS_IMAGE_ENV, TEST_CLIENTS_IMAGE_DEFAULT);
-    private static final String SCRAPER_IMAGE_DEFAULT = STRIMZI_REGISTRY + "/" + STRIMZI_ORG + "/kafka:" + STRIMZI_TAG + "-kafka-" + ST_KAFKA_VERSION;
+    private static final String SCRAPER_IMAGE_DEFAULT = getIfNotEmptyOrDefault(STRIMZI_REGISTRY, STRIMZI_REGISTRY_DEFAULT) + "/" +
+        getIfNotEmptyOrDefault(STRIMZI_ORG, STRIMZI_ORG_DEFAULT) + "/kafka:" +
+        getIfNotEmptyOrDefault(STRIMZI_TAG, STRIMZI_TAG_DEFAULT) + "-kafka-" + ST_KAFKA_VERSION;
     public static final String SCRAPER_IMAGE = getOrDefault(SCRAPER_IMAGE_ENV, SCRAPER_IMAGE_DEFAULT);
 
     // variables for kafka bridge image
@@ -225,7 +246,7 @@ public class Environment {
     public static final String OLM_SOURCE_NAME = getOrDefault(OLM_SOURCE_NAME_ENV, OLM_SOURCE_NAME_DEFAULT);
     public static final String OLM_SOURCE_NAMESPACE = getOrDefault(OLM_SOURCE_NAMESPACE_ENV, OpenShift.OLM_SOURCE_NAMESPACE);
     public static final String OLM_APP_BUNDLE_PREFIX = getOrDefault(OLM_APP_BUNDLE_PREFIX_ENV, OLM_APP_BUNDLE_PREFIX_DEFAULT);
-    public static final String OLM_OPERATOR_LATEST_RELEASE_VERSION = getOrDefault(OLM_OPERATOR_VERSION_ENV, OLM_OPERATOR_VERSION_DEFAULT);
+    public static final String OLM_OPERATOR_CHANNEL = getOrDefault(OLM_OPERATOR_CHANNEL_ENV, OLM_OPERATOR_CHANNEL_DEFAULT);
     // NetworkPolicy variable
     public static final boolean DEFAULT_TO_DENY_NETWORK_POLICIES = getOrDefault(DEFAULT_TO_DENY_NETWORK_POLICIES_ENV, Boolean::parseBoolean, DEFAULT_TO_DENY_NETWORK_POLICIES_DEFAULT);
     // Cluster Operator installation type variable
@@ -238,20 +259,28 @@ public class Environment {
 
     public static final String CONNECT_BUILD_IMAGE_PATH = getOrDefault(CONNECT_BUILD_IMAGE_PATH_ENV, "");
     public static final String CONNECT_BUILD_REGISTRY_SECRET = getOrDefault(CONNECT_BUILD_REGISTRY_SECRET_ENV, "");
-    public static final String TEST_SUITE_NAMESPACE = Environment.isNamespaceRbacScope() ? Constants.CO_NAMESPACE : "test-suite-namespace";
+    public static final String TEST_SUITE_NAMESPACE = Environment.isNamespaceRbacScope() ? TestConstants.CO_NAMESPACE : "test-suite-namespace";
 
     public static final String IP_FAMILY = getOrDefault(IP_FAMILY_ENV, IP_FAMILY_DEFAULT);
 
+    public static final String KAFKA_TIERED_STORAGE_BASE_IMAGE = getOrDefault(KAFKA_TIERED_STORAGE_BASE_IMAGE_ENV, KAFKA_TIERED_STORAGE_BASE_IMAGE_DEFAULT);
+    public static final String KANIKO_IMAGE = getOrDefault(KANIKO_IMAGE_ENV, KANIKO_IMAGE_DEFAULT);
+
+    public static final String POSTGRES_IMAGE = getOrDefault(POSTGRES_IMAGE_ENV, POSTGRES_IMAGE_DEFAULT);
 
     private Environment() { }
 
     static {
         String debugFormat = "{}: {}";
         LOGGER.info("Used environment variables:");
-        LOGGER.info(debugFormat, "CONFIG", config);
         VALUES.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
                 .forEach(entry -> LOGGER.info(debugFormat, entry.getKey(), entry.getValue()));
+        try {
+            saveConfigurationFile();
+        } catch (IOException e) {
+            LOGGER.warn("Yaml configuration can't be saved");
+        }
     }
 
     public static boolean isOlmInstall() {
@@ -264,22 +293,6 @@ public class Environment {
 
     public static boolean isNamespaceRbacScope() {
         return STRIMZI_RBAC_SCOPE_NAMESPACE.equals(STRIMZI_RBAC_SCOPE);
-    }
-
-    /**
-     * Determine wheter KRaft mode of Kafka cluster is enabled in Cluster Operator or not.
-     * @return true if KRaft mode is enabled, otherwise false
-     */
-    public static boolean isKRaftModeEnabled() {
-        return STRIMZI_FEATURE_GATES.contains(Constants.USE_KRAFT_MODE);
-    }
-
-    public static boolean isKafkaNodePoolsEnabled() {
-        return !STRIMZI_FEATURE_GATES.contains(Constants.DONT_USE_KAFKA_NODE_POOLS);
-    }
-
-    public static boolean isUnidirectionalTopicOperatorEnabled() {
-        return !STRIMZI_FEATURE_GATES.contains(Constants.DONT_USE_UNIDIRECTIONAL_TOPIC_OPERATOR);
     }
 
     /**
@@ -313,22 +326,27 @@ public class Environment {
         return getOrDefault(varName, String::toString, defaultValue);
     }
 
+    private static <T> T getOrDefault(String var, Function<String, T> converter, T defaultValue) {
+        String value = isEnvVarSet(var) ?
+                System.getenv(var) :
+                (Objects.requireNonNull(YAML_DATA).get(var) != null ?
+                        YAML_DATA.get(var).toString() :
+                        null);
+        T returnValue = defaultValue;
+        if (value != null) {
+            returnValue = converter.apply(value);
+        }
+        VALUES.put(var, String.valueOf(returnValue));
+        return returnValue;
+    }
+
     public static String getImageOutputRegistry() {
         if (KubeClusterResource.getInstance().isOpenShift()) {
             return "image-registry.openshift-image-registry.svc:5000";
         } else if (KubeClusterResource.getInstance().isKind()) {
             // we will need a hostname of machine
-            String hostname = "";
-            try {
-                if (Environment.isIpv4Family() || Environment.isDualStackIpFamily()) {
-                    hostname = InetAddress.getLocalHost().getHostAddress() + ":5001";
-                } else if (Environment.isIpv6Family()) {
-                    hostname = "myregistry.local:5001";
-                }
-            } catch (UnknownHostException e) {
-                throw new RuntimeException(e);
-            }
-            LOGGER.info("Using container registry :{}", hostname);
+            String hostname = getHostname();
+            LOGGER.info("Using container registry '{}'", hostname);
             return hostname;
         } else {
             LOGGER.warn("For running these tests on K8s you have to have internal registry deployed using `minikube start --insecure-registry '10.0.0.0/24'` and `minikube addons enable registry`");
@@ -342,38 +360,68 @@ public class Environment {
         }
     }
 
-    public static String getImageOutputRegistry(String namespace, String imageName, String tag) {
+    private static String getHostname() {
+        String hostname = "";
+        try {
+            if (Environment.isIpv4Family() || Environment.isDualStackIpFamily()) {
+                hostname = InetAddress.getLocalHost().getHostAddress() + ":5001";
+            } else if (Environment.isIpv6Family()) {
+                hostname = "myregistry.local:5001";
+            }
+        } catch (UnknownHostException e) {
+            throw new RuntimeException(e);
+        }
+        return hostname;
+    }
+
+    public static String getImageOutputRegistry(String namespaceName, String imageName, String tag) {
         if (!Environment.CONNECT_BUILD_IMAGE_PATH.isEmpty()) {
             return Environment.CONNECT_BUILD_IMAGE_PATH + ":" + tag;
         } else {
-            return getImageOutputRegistry() + "/" + namespace + "/" + imageName + ":" + tag;
+            return getImageOutputRegistry() + "/" + namespaceName + "/" + imageName + ":" + tag;
         }
     }
 
-    private static <T> T getOrDefault(String var, Function<String, T> converter, T defaultValue) {
-        String value = System.getenv(var) != null ?
-                System.getenv(var) :
-                (Objects.requireNonNull(JSON_DATA).get(var) != null ?
-                        JSON_DATA.get(var).asText() :
-                        null);
-        T returnValue = defaultValue;
-        if (value != null) {
-            returnValue = converter.apply(value);
-        }
-        VALUES.put(var, String.valueOf(returnValue));
-        return returnValue;
+    private static void saveConfigurationFile() throws IOException {
+        Path logPath = Path.of(TEST_LOG_DIR);
+        Files.createDirectories(logPath);
+
+        LinkedHashMap<String, String> toSave = new LinkedHashMap<>();
+
+        VALUES.forEach((key, value) -> {
+            if (isWriteable(key, value)) {
+                toSave.put(key, value);
+            }
+        });
+
+        ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+        mapper.writerWithDefaultPrettyPrinter().writeValue(logPath.resolve("config.yaml").toFile(), toSave);
     }
 
-    private static JsonNode loadConfigurationFile() {
-        config = System.getenv().getOrDefault(CONFIG_FILE_PATH_ENV,
-                Paths.get(System.getProperty("user.dir"), "config.json").toAbsolutePath().toString());
-        ObjectMapper mapper = new ObjectMapper();
+    private static Map<String, Object> loadConfigurationFile() {
+        String config = System.getenv().getOrDefault(CONFIG_FILE_PATH_ENV,
+                Paths.get(System.getProperty("user.dir"), "config.yaml").toAbsolutePath().toString());
+        ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
         try {
-            File jsonFile = new File(config).getAbsoluteFile();
-            return mapper.readTree(jsonFile);
+            return mapper.readValue(new File(config), new TypeReference<>() { });
         } catch (IOException ex) {
-            LOGGER.debug("JSON configuration is not provided or cannot be processed!");
-            return mapper.createObjectNode();
+            LOGGER.info("Yaml configuration not provider or not exists");
+            return Collections.emptyMap();
         }
+    }
+
+    private static boolean isWriteable(String var, String value) {
+        return !value.equals("null")
+                && !var.equals(CONFIG_FILE_PATH_ENV)
+                && !var.equals(TEST_LOG_DIR)
+                && !var.equals("USER");
+    }
+
+    public static boolean isEnvVarSet(String envVarName) {
+        return System.getenv(envVarName) != null;
+    }
+
+    public static String getIfNotEmptyOrDefault(String envVar, String defaultValue) {
+        return envVar.isEmpty() ? defaultValue : envVar;
     }
 }

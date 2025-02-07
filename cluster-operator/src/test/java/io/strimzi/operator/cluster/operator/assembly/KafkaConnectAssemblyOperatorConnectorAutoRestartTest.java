@@ -5,15 +5,14 @@
 package io.strimzi.operator.cluster.operator.assembly;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.strimzi.api.kafka.KafkaConnectorList;
-import io.strimzi.api.kafka.model.KafkaConnector;
-import io.strimzi.api.kafka.model.KafkaConnectorBuilder;
-import io.strimzi.api.kafka.model.status.AutoRestartStatusBuilder;
+import io.strimzi.api.kafka.model.connector.KafkaConnector;
+import io.strimzi.api.kafka.model.connector.KafkaConnectorBuilder;
+import io.strimzi.api.kafka.model.connector.KafkaConnectorList;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.CrdOperator;
 import io.strimzi.operator.common.Reconciliation;
-import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.platform.KubernetesVersion;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -28,7 +27,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.not;
@@ -59,128 +60,10 @@ public class KafkaConnectAssemblyOperatorConnectorAutoRestartTest {
     }
 
     @Test
-    public void testShouldAutoRestartConnector(VertxTestContext context) {
-        ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
-
-        KafkaConnectAssemblyOperator op = new KafkaConnectAssemblyOperator(vertx, new PlatformFeaturesAvailability(true, KubernetesVersion.MINIMAL_SUPPORTED_VERSION),
-            supplier, ResourceUtils.dummyClusterOperatorConfig());
-
-        // Should restart after minute 2 when auto restart count is 1
-        var autoRestartStatus =  new AutoRestartStatusBuilder()
-            .withCount(1)
-            .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(3).format(DateTimeFormatter.ISO_INSTANT))
-            .build();
-        assertThat(op.shouldAutoRestart(autoRestartStatus, null), is(true));
-
-        // Should not restart before minute 2 when auto restart count is 1
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-            .withCount(1)
-            .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(1).format(DateTimeFormatter.ISO_INSTANT))
-            .build();
-        assertThat(op.shouldAutoRestart(autoRestartStatus, null), is(false));
-
-        // Should restart after minute 12 when auto restart count is 3
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-            .withCount(3)
-            .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(13).format(DateTimeFormatter.ISO_INSTANT))
-            .build();
-        assertThat(op.shouldAutoRestart(autoRestartStatus, null), is(true));
-
-        // Should not restart before minute 12 when auto restart count is 3
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-            .withCount(3)
-            .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(10).format(DateTimeFormatter.ISO_INSTANT))
-            .build();
-        assertThat(op.shouldAutoRestart(autoRestartStatus, null), is(false));
-
-        // Should restart after minute 61 when auto restart count is 25
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-                .withCount(25)
-                .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(61).format(DateTimeFormatter.ISO_INSTANT))
-                .build();
-        assertThat(op.shouldAutoRestart(autoRestartStatus, null), is(true));
-
-        // Should not restart after 59 minutes when auto restart count is 25
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-                .withCount(25)
-                .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(59).format(DateTimeFormatter.ISO_INSTANT))
-                .build();
-        assertThat(op.shouldAutoRestart(autoRestartStatus, null), is(false));
-
-        // Should not restart after 6 attempts
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-            .withCount(7)
-            .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusDays(1).format(DateTimeFormatter.ISO_INSTANT))
-            .build();
-        assertThat(op.shouldAutoRestart(autoRestartStatus, 7), is(false));
-
-        // Should restart after 6 attempts when maxRestarts set to higher number
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-                .withCount(7)
-                .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusDays(1).format(DateTimeFormatter.ISO_INSTANT))
-                .build();
-        assertThat(op.shouldAutoRestart(autoRestartStatus, 8), is(true));
-
-        context.completeNow();
-    }
-
-    @Test
-    public void testShouldResetAutoRestartStatus(VertxTestContext context) {
-        ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
-
-        KafkaConnectAssemblyOperator op = new KafkaConnectAssemblyOperator(vertx, new PlatformFeaturesAvailability(true, KubernetesVersion.MINIMAL_SUPPORTED_VERSION),
-                supplier, ResourceUtils.dummyClusterOperatorConfig());
-
-        // Should reset after minute 2 when auto restart count is 1
-        var autoRestartStatus =  new AutoRestartStatusBuilder()
-                .withCount(1)
-                .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(3).format(DateTimeFormatter.ISO_INSTANT))
-                .build();
-        assertThat(op.shouldResetAutoRestartStatus(autoRestartStatus), is(true));
-
-        // Should not reset before minute 2 when auto restart count is 1
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-                .withCount(1)
-                .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(1).format(DateTimeFormatter.ISO_INSTANT))
-                .build();
-        assertThat(op.shouldResetAutoRestartStatus(autoRestartStatus), is(false));
-
-        // Should reset after minute 12 when auto restart count is 3
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-                .withCount(3)
-                .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(13).format(DateTimeFormatter.ISO_INSTANT))
-                .build();
-        assertThat(op.shouldResetAutoRestartStatus(autoRestartStatus), is(true));
-
-        // Should not reset before minute 12 when auto restart count is 3
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-                .withCount(3)
-                .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(10).format(DateTimeFormatter.ISO_INSTANT))
-                .build();
-        assertThat(op.shouldResetAutoRestartStatus(autoRestartStatus), is(false));
-
-        // Should reset after 60 minutes when auto restart count is 25
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-                .withCount(25)
-                .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(61).format(DateTimeFormatter.ISO_INSTANT))
-                .build();
-        assertThat(op.shouldResetAutoRestartStatus(autoRestartStatus), is(true));
-
-        // Should not reset after 59 minutes when auto restart count is 25
-        autoRestartStatus =  new AutoRestartStatusBuilder()
-                .withCount(25)
-                .withLastRestartTimestamp(ZonedDateTime.now(ZoneOffset.UTC).minusMinutes(59).format(DateTimeFormatter.ISO_INSTANT))
-                .build();
-        assertThat(op.shouldResetAutoRestartStatus(autoRestartStatus), is(false));
-
-        context.completeNow();
-    }
-
-    @Test
     public void testAutoRestartWhenDisabled(VertxTestContext context) {
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
         KafkaConnectApi mockConnectApi = mock(KafkaConnectApi.class);
-        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of());
+        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of(), List.of(), List.of(), null);
         KafkaConnector connector = new KafkaConnectorBuilder()
                 .withNewMetadata()
                     .withName("my-connector")
@@ -214,7 +97,7 @@ public class KafkaConnectAssemblyOperatorConnectorAutoRestartTest {
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         KafkaConnectApi mockConnectApi = mock(KafkaConnectApi.class);
-        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of());
+        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of(), List.of(), List.of(), null);
         KafkaConnector connector = new KafkaConnectorBuilder()
                 .withNewMetadata()
                     .withName("my-connector")
@@ -256,8 +139,8 @@ public class KafkaConnectAssemblyOperatorConnectorAutoRestartTest {
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         KafkaConnectApi mockConnectApi = mock(KafkaConnectApi.class);
-        when(mockConnectApi.restart(any(), anyInt(), any(), anyBoolean(), anyBoolean())).thenReturn(Future.succeededFuture(Map.of()));
-        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of("connector", Map.of("state", "FAILED")));
+        when(mockConnectApi.restart(any(), anyInt(), any(), anyBoolean(), anyBoolean())).thenReturn(CompletableFuture.completedFuture(Map.of()));
+        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of("connector", Map.of("state", "FAILED")), List.of(), List.of(), null);
         KafkaConnector connector = new KafkaConnectorBuilder()
                 .withNewMetadata()
                     .withName("my-connector")
@@ -301,8 +184,8 @@ public class KafkaConnectAssemblyOperatorConnectorAutoRestartTest {
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         KafkaConnectApi mockConnectApi = mock(KafkaConnectApi.class);
-        when(mockConnectApi.restart(any(), anyInt(), any(), anyBoolean(), anyBoolean())).thenReturn(Future.succeededFuture(Map.of()));
-        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of("connector", Map.of("state", "FAILED")));
+        when(mockConnectApi.restart(any(), anyInt(), any(), anyBoolean(), anyBoolean())).thenReturn(CompletableFuture.completedFuture(Map.of()));
+        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of("connector", Map.of("state", "FAILED")), List.of(), List.of(), null);
         KafkaConnector connector = new KafkaConnectorBuilder()
                 .withNewMetadata()
                     .withName("my-connector")
@@ -351,7 +234,7 @@ public class KafkaConnectAssemblyOperatorConnectorAutoRestartTest {
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         KafkaConnectApi mockConnectApi = mock(KafkaConnectApi.class);
-        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of("connector", Map.of("state", "FAILED")));
+        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of("connector", Map.of("state", "FAILED")), List.of(), List.of(), null);
         KafkaConnector connector = new KafkaConnectorBuilder()
                 .withNewMetadata()
                     .withName("my-connector")
@@ -400,7 +283,7 @@ public class KafkaConnectAssemblyOperatorConnectorAutoRestartTest {
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         KafkaConnectApi mockConnectApi = mock(KafkaConnectApi.class);
-        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of());
+        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of(), List.of(), List.of(), null);
         KafkaConnector connector = new KafkaConnectorBuilder()
                 .withNewMetadata()
                     .withName("my-connector")
@@ -446,7 +329,7 @@ public class KafkaConnectAssemblyOperatorConnectorAutoRestartTest {
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         KafkaConnectApi mockConnectApi = mock(KafkaConnectApi.class);
-        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of());
+        AbstractConnectOperator.ConnectorStatusAndConditions statusAndConditions = new AbstractConnectOperator.ConnectorStatusAndConditions(Map.of(), List.of(), List.of(), null);
         KafkaConnector connector = new KafkaConnectorBuilder()
                 .withNewMetadata()
                     .withName("my-connector")

@@ -66,11 +66,6 @@ public class RestrictedPodSecurityProvider extends BaselinePodSecurityProvider {
     }
 
     @Override
-    public SecurityContext entityOperatorTlsSidecarContainerSecurityContext(ContainerSecurityProviderContext context) {
-        return createRestrictedContainerSecurityContext(context);
-    }
-
-    @Override
     public SecurityContext kafkaExporterContainerSecurityContext(ContainerSecurityProviderContext context) {
         return createRestrictedContainerSecurityContext(context);
     }
@@ -100,11 +95,6 @@ public class RestrictedPodSecurityProvider extends BaselinePodSecurityProvider {
             //    => if Kafka Connect Build is used, we throw an exception to not deploy it.
             throw new UnsupportedOperationException("Kafka Connect Build using the Kaniko builder is not available under the restricted security profile");
         }
-    }
-
-    @Override
-    public SecurityContext kafkaMirrorMakerContainerSecurityContext(ContainerSecurityProviderContext context) {
-        return createRestrictedContainerSecurityContext(context);
     }
 
     @Override

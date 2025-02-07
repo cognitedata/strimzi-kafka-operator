@@ -9,23 +9,23 @@ import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.client.CustomResource;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
-import io.strimzi.api.kafka.model.Spec;
-import io.strimzi.api.kafka.model.status.Status;
+import io.strimzi.api.kafka.model.common.Spec;
+import io.strimzi.api.kafka.model.kafka.Status;
 import io.strimzi.certs.CertManager;
-import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
+import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.model.ImagePullPolicy;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
-import io.strimzi.operator.common.model.PasswordGenerator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.AbstractWatchableStatusedNamespacedResourceOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ClusterRoleBindingOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ConfigMapOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.PodDisruptionBudgetOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.SecretOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ServiceAccountOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ServiceOperator;
 import io.strimzi.operator.common.Reconciliation;
-import io.strimzi.operator.common.operator.resource.AbstractWatchableStatusedNamespacedResourceOperator;
-import io.strimzi.operator.common.operator.resource.ClusterRoleBindingOperator;
-import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
-import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
-import io.strimzi.operator.common.operator.resource.SecretOperator;
-import io.strimzi.operator.common.operator.resource.ServiceAccountOperator;
-import io.strimzi.operator.common.operator.resource.ServiceOperator;
+import io.strimzi.operator.common.model.PasswordGenerator;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 
@@ -39,6 +39,13 @@ import java.util.List;
  *
  * <p>This class manages a per-assembly locking strategy so only one operation per assembly
  * can proceed at once.</p>
+ *
+ * @param <C>   Kubernetes Client type
+ * @param <T>   Type representing the custom resource
+ * @param <R>   Type extending the Fabric8 Resource class
+ * @param <P>   Type representing the .spec section of the custom resource
+ * @param <S>   Type representing the .status section of the custom resource
+ * @param <L>   Type representing the custom resource list
  */
 public abstract class AbstractAssemblyOperator<C extends KubernetesClient, T extends CustomResource<P, S>,
         L extends KubernetesResourceList<T>, R extends Resource<T>, P extends Spec, S extends Status>

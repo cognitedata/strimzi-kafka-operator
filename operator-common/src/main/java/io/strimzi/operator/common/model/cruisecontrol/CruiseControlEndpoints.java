@@ -36,7 +36,17 @@ public enum CruiseControlEndpoints {
     /**
      * Remove broker
      */
-    REMOVE_BROKER("/kafkacruisecontrol/remove_broker");
+    REMOVE_BROKER("/kafkacruisecontrol/remove_broker"),
+
+    /**
+     * Topic configuration
+     */
+    TOPIC_CONFIGURATION("/kafkacruisecontrol/topic_configuration"),
+
+    /**
+     * Remove disks
+     */
+    REMOVE_DISKS("/kafkacruisecontrol/remove_disks");
 
     private final String path;
 

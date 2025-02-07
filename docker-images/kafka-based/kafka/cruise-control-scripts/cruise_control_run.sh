@@ -36,8 +36,28 @@ fi
 
 # enabling Prometheus JMX exporter as Java agent
 if [ "$CRUISE_CONTROL_METRICS_ENABLED" = "true" ]; then
-  KAFKA_OPTS="${KAFKA_OPTS} -javaagent:$(ls "$KAFKA_HOME"/libs/jmx_prometheus_javaagent*.jar)=9404:$CRUISE_CONTROL_HOME/custom-config/metrics-config.json"
+  KAFKA_OPTS="${KAFKA_OPTS} -javaagent:$(ls "$JMX_EXPORTER_HOME"/jmx_prometheus_javaagent*.jar)=9404:$CRUISE_CONTROL_HOME/custom-config/metrics-config.json"
   export KAFKA_OPTS
+fi
+
+# Set Debug options if enabled
+if [ "x$KAFKA_DEBUG" != "x" ]; then
+
+    # Use default ports
+    DEFAULT_JAVA_DEBUG_PORT="5005"
+
+    if [ -z "$JAVA_DEBUG_PORT" ]; then
+        JAVA_DEBUG_PORT="$DEFAULT_JAVA_DEBUG_PORT"
+    fi
+
+    # Use the defaults if JAVA_DEBUG_OPTS was not set
+    DEFAULT_JAVA_DEBUG_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,suspend=${DEBUG_SUSPEND_FLAG:-n},address=$JAVA_DEBUG_PORT"
+    if [ -z "$JAVA_DEBUG_OPTS" ]; then
+        JAVA_DEBUG_OPTS="$DEFAULT_JAVA_DEBUG_OPTS"
+    fi
+
+    echo "Enabling Java debug options: $JAVA_DEBUG_OPTS"
+    KAFKA_OPTS="$JAVA_DEBUG_OPTS $KAFKA_OPTS"
 fi
 
 # Configure heap based on the available resources if needed

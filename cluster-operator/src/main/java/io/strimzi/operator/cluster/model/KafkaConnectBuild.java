@@ -21,15 +21,15 @@ import io.fabric8.openshift.api.model.BuildOutputBuilder;
 import io.fabric8.openshift.api.model.BuildRequest;
 import io.fabric8.openshift.api.model.BuildRequestBuilder;
 import io.fabric8.openshift.api.model.DockerBuildStrategyBuilder;
-import io.strimzi.api.kafka.model.KafkaConnect;
-import io.strimzi.api.kafka.model.KafkaConnectResources;
-import io.strimzi.api.kafka.model.KafkaConnectSpec;
+import io.strimzi.api.kafka.model.common.template.PodTemplate;
+import io.strimzi.api.kafka.model.connect.KafkaConnect;
+import io.strimzi.api.kafka.model.connect.KafkaConnectResources;
+import io.strimzi.api.kafka.model.connect.KafkaConnectSpec;
+import io.strimzi.api.kafka.model.connect.KafkaConnectTemplate;
 import io.strimzi.api.kafka.model.connect.build.Build;
 import io.strimzi.api.kafka.model.connect.build.DockerOutput;
 import io.strimzi.api.kafka.model.connect.build.ImageStreamOutput;
 import io.strimzi.api.kafka.model.connect.build.Plugin;
-import io.strimzi.api.kafka.model.template.KafkaConnectTemplate;
-import io.strimzi.api.kafka.model.template.PodTemplate;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.model.securityprofiles.ContainerSecurityProviderContextImpl;
 import io.strimzi.operator.cluster.model.securityprofiles.PodSecurityProviderContextImpl;
@@ -279,6 +279,8 @@ public class KafkaConnectBuild extends AbstractModel {
         } else {
             throw new RuntimeException("Kubernetes build requires output of type `docker`.");
         }
+        
+        TemplateUtils.addAdditionalVolumes(templatePod, volumes);
 
         return volumes;
     }
@@ -301,6 +303,7 @@ public class KafkaConnectBuild extends AbstractModel {
         } else {
             throw new RuntimeException("Kubernetes build requires output of type `docker`.");
         }
+        TemplateUtils.addAdditionalVolumeMounts(volumeMounts, templateContainer);
 
         return volumeMounts;
     }

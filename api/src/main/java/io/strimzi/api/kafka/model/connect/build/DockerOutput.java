@@ -7,10 +7,11 @@ package io.strimzi.api.kafka.model.connect.build;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
-import io.strimzi.api.kafka.model.Constants;
+import io.strimzi.api.kafka.model.common.Constants;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.sundr.builder.annotations.Buildable;
 import lombok.EqualsAndHashCode;
+import lombok.ToString;
 
 import java.util.List;
 
@@ -22,17 +23,16 @@ import java.util.List;
         builderPackage = Constants.FABRIC8_KUBERNETES_API
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
-@JsonPropertyOrder({ "image", "pushSecret" })
-@EqualsAndHashCode
+@JsonPropertyOrder({ "image", "pushSecret", "additionalKanikoOptions", "type" })
+@EqualsAndHashCode(callSuper = true)
+@ToString(callSuper = true)
 public class DockerOutput extends Output {
-    private static final long serialVersionUID = 1L;
-
-    public static final String ALLOWED_KANIKO_OPTIONS = "--customPlatform, --insecure, --insecure-pull, " +
+    // Note: --customPlatform is deprecated option replaced with --custom-platform. We enable both for backwards compatibility
+    public static final String ALLOWED_KANIKO_OPTIONS = "--customPlatform, --custom-platform, --insecure, --insecure-pull, " +
             "--insecure-registry, --log-format, --log-timestamp, --registry-mirror, --reproducible, --single-snapshot, " +
             "--skip-tls-verify, --skip-tls-verify-pull, --skip-tls-verify-registry, --verbosity, --snapshotMode, " +
-            "--use-new-run";
+            "--use-new-run, --registry-certificate, --registry-client-cert";
 
-    private String image;
     private String pushSecret;
     private List<String> additionalKanikoOptions;
 

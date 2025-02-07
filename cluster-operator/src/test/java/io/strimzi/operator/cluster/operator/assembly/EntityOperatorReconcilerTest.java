@@ -11,35 +11,40 @@ import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.api.model.rbac.Role;
 import io.fabric8.kubernetes.api.model.rbac.RoleBinding;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaBuilder;
-import io.strimzi.api.kafka.model.KafkaResources;
-import io.strimzi.certs.OpenSslCertManager;
-import io.strimzi.operator.cluster.KafkaVersionTestUtils;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaBuilder;
+import io.strimzi.api.kafka.model.kafka.KafkaResources;
+import io.strimzi.api.kafka.model.kafka.cruisecontrol.CruiseControlSpecBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.AbstractModel;
 import io.strimzi.operator.cluster.model.ClusterCa;
-import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
-import io.strimzi.operator.common.model.PasswordGenerator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ConfigMapOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.DeploymentOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.NetworkPolicyOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.RoleBindingOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.RoleOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.SecretOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ServiceAccountOperator;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.model.Ca;
+import io.strimzi.operator.common.model.PasswordGenerator;
 import io.strimzi.operator.common.operator.MockCertManager;
-import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
-import io.strimzi.operator.common.operator.resource.DeploymentOperator;
-import io.strimzi.operator.common.operator.resource.RoleBindingOperator;
-import io.strimzi.operator.common.operator.resource.RoleOperator;
-import io.strimzi.operator.common.operator.resource.SecretOperator;
-import io.strimzi.operator.common.operator.resource.ServiceAccountOperator;
-import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
 import io.vertx.core.Future;
 import io.vertx.junit5.Checkpoint;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
+import java.util.Map;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
@@ -50,16 +55,31 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
-@SuppressWarnings("deprecation") // Because of deprecated KafkaResources.entityOperatorSecretName
 @ExtendWith(VertxExtension.class)
 public class EntityOperatorReconcilerTest {
     private static final String NAMESPACE = "namespace";
     private static final String NAME = "name";
-    private static final KafkaVersion.Lookup VERSIONS = KafkaVersionTestUtils.getKafkaVersionLookup();
+    private static final Kafka KAFKA = new KafkaBuilder()
+            .withNewMetadata()
+                .withName(NAME)
+                .withNamespace(NAMESPACE)
+                .withAnnotations(Map.of(Annotations.ANNO_STRIMZI_IO_NODE_POOLS, "enabled", Annotations.ANNO_STRIMZI_IO_KRAFT, "enabled"))
+            .endMetadata()
+            .withNewSpec()
+                .withNewKafka()
+                    .withListeners(new GenericKafkaListenerBuilder()
+                            .withName("plain")
+                            .withPort(9092)
+                            .withType(KafkaListenerType.INTERNAL)
+                            .withTls(false)
+                            .build())
+                .endKafka()
+            .endSpec()
+            .build();
 
     private final static ClusterCa CLUSTER_CA = new ClusterCa(
             Reconciliation.DUMMY_RECONCILIATION,
-            new OpenSslCertManager(),
+            new MockCertManager(),
             new PasswordGenerator(10, "a", "a"),
             NAME,
             ResourceUtils.createInitialCaCertSecret(NAMESPACE, NAME, AbstractModel.clusterCaCertSecretName(NAME), MockCertManager.clusterCaCert(), MockCertManager.clusterCaCertStore(), "123456"),
@@ -80,8 +100,8 @@ public class EntityOperatorReconcilerTest {
         ArgumentCaptor<ServiceAccount> saCaptor = ArgumentCaptor.forClass(ServiceAccount.class);
         when(mockSaOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), saCaptor.capture())).thenReturn(Future.succeededFuture());
 
-        ArgumentCaptor<Secret> operatorSecretCaptor = ArgumentCaptor.forClass(Secret.class);
-        when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorSecretName(NAME)), operatorSecretCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockSecretOps.getAsync(eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorSecretName(NAME)))).thenReturn(Future.succeededFuture());
+        when(mockSecretOps.getAsync(eq(NAMESPACE), eq(KafkaResources.entityUserOperatorSecretName(NAME)))).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> toSecretCaptor = ArgumentCaptor.forClass(Secret.class);
         when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorSecretName(NAME)), toSecretCaptor.capture())).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> uoSecretCaptor = ArgumentCaptor.forClass(Secret.class);
@@ -108,7 +128,7 @@ public class EntityOperatorReconcilerTest {
         when(mockDepOps.waitForObserved(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDepOps.readiness(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, "foo", 120, 30))
+        Kafka kafka = new KafkaBuilder(KAFKA)
                 .editSpec()
                     .withNewEntityOperator()
                         .withNewTopicOperator()
@@ -124,7 +144,6 @@ public class EntityOperatorReconcilerTest {
                 ResourceUtils.dummyClusterOperatorConfig(),
                 supplier,
                 kafka,
-                VERSIONS,
                 CLUSTER_CA
         );
 
@@ -134,8 +153,6 @@ public class EntityOperatorReconcilerTest {
                     assertThat(saCaptor.getAllValues().size(), is(1));
                     assertThat(saCaptor.getValue(), is(notNullValue()));
 
-                    assertThat(operatorSecretCaptor.getAllValues().size(), is(1));
-                    assertThat(operatorSecretCaptor.getAllValues().get(0), is(nullValue()));
                     assertThat(toSecretCaptor.getAllValues().size(), is(1));
                     assertThat(toSecretCaptor.getAllValues().get(0), is(notNullValue()));
                     assertThat(uoSecretCaptor.getAllValues().size(), is(1));
@@ -159,6 +176,9 @@ public class EntityOperatorReconcilerTest {
 
                     assertThat(depCaptor.getAllValues().size(), is(1));
                     assertThat(depCaptor.getValue(), is(notNullValue()));
+                    assertThat(depCaptor.getValue().getSpec().getTemplate().getMetadata().getAnnotations().get(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION), is("0"));
+                    assertThat(depCaptor.getValue().getSpec().getTemplate().getMetadata().getAnnotations().get(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_KEY_GENERATION), is("0"));
+                    assertThat(depCaptor.getValue().getSpec().getTemplate().getMetadata().getAnnotations().get(Annotations.ANNO_STRIMZI_SERVER_CERT_HASH), is("4d715cdd4d715cdd"));
 
                     async.flag();
                 })));
@@ -181,8 +201,8 @@ public class EntityOperatorReconcilerTest {
         ArgumentCaptor<ServiceAccount> saCaptor = ArgumentCaptor.forClass(ServiceAccount.class);
         when(mockSaOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), saCaptor.capture())).thenReturn(Future.succeededFuture());
 
-        ArgumentCaptor<Secret> operatorSecretCaptor = ArgumentCaptor.forClass(Secret.class);
-        when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorSecretName(NAME)), operatorSecretCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockSecretOps.getAsync(eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorSecretName(NAME)))).thenReturn(Future.succeededFuture());
+        when(mockSecretOps.getAsync(eq(NAMESPACE), eq(KafkaResources.entityUserOperatorSecretName(NAME)))).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> toSecretCaptor = ArgumentCaptor.forClass(Secret.class);
         when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorSecretName(NAME)), toSecretCaptor.capture())).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> uoSecretCaptor = ArgumentCaptor.forClass(Secret.class);
@@ -215,7 +235,7 @@ public class EntityOperatorReconcilerTest {
         when(mockDepOps.waitForObserved(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDepOps.readiness(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, "foo", 120, 30))
+        Kafka kafka = new KafkaBuilder(KAFKA)
                 .editSpec()
                     .withNewEntityOperator()
                         .withNewTopicOperator()
@@ -233,7 +253,6 @@ public class EntityOperatorReconcilerTest {
                 ResourceUtils.dummyClusterOperatorConfig(),
                 supplier,
                 kafka,
-                VERSIONS,
                 CLUSTER_CA
         );
 
@@ -243,8 +262,6 @@ public class EntityOperatorReconcilerTest {
                     assertThat(saCaptor.getAllValues().size(), is(1));
                     assertThat(saCaptor.getValue(), is(notNullValue()));
 
-                    assertThat(operatorSecretCaptor.getAllValues().size(), is(1));
-                    assertThat(operatorSecretCaptor.getAllValues().get(0), is(nullValue()));
                     assertThat(toSecretCaptor.getAllValues().size(), is(1));
                     assertThat(toSecretCaptor.getAllValues().get(0), is(notNullValue()));
                     assertThat(uoSecretCaptor.getAllValues().size(), is(1));
@@ -283,8 +300,9 @@ public class EntityOperatorReconcilerTest {
                 })));
     }
 
-    @Test
-    public void reconcileWithToOnly(VertxTestContext context) {
+    @ParameterizedTest
+    @ValueSource(booleans = { true, false })
+    public void reconcileWithToOnly(boolean cruiseControlEnabled, VertxTestContext context) {
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
         DeploymentOperator mockDepOps = supplier.deploymentOperations;
         SecretOperator mockSecretOps = supplier.secretOperations;
@@ -297,10 +315,12 @@ public class EntityOperatorReconcilerTest {
         ArgumentCaptor<ServiceAccount> saCaptor = ArgumentCaptor.forClass(ServiceAccount.class);
         when(mockSaOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), saCaptor.capture())).thenReturn(Future.succeededFuture());
 
-        ArgumentCaptor<Secret> operatorSecretCaptor = ArgumentCaptor.forClass(Secret.class);
-        when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorSecretName(NAME)), operatorSecretCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockSecretOps.getAsync(eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorSecretName(NAME)))).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> toSecretCaptor = ArgumentCaptor.forClass(Secret.class);
         when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorSecretName(NAME)), toSecretCaptor.capture())).thenReturn(Future.succeededFuture());
+        if (cruiseControlEnabled) {
+            when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorCcApiSecretName(NAME)), toSecretCaptor.capture())).thenReturn(Future.succeededFuture());
+        }
         ArgumentCaptor<Secret> uoSecretCaptor = ArgumentCaptor.forClass(Secret.class);
         when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityUserOperatorSecretName(NAME)), uoSecretCaptor.capture())).thenReturn(Future.succeededFuture());
 
@@ -325,7 +345,7 @@ public class EntityOperatorReconcilerTest {
         when(mockDepOps.waitForObserved(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDepOps.readiness(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, "foo", 120, 30))
+        Kafka kafka = new KafkaBuilder(KAFKA)
                 .editSpec()
                     .withNewEntityOperator()
                         .withNewTopicOperator()
@@ -334,12 +354,15 @@ public class EntityOperatorReconcilerTest {
                 .endSpec()
                 .build();
 
+        if (cruiseControlEnabled) {
+            kafka.getSpec().setCruiseControl(new CruiseControlSpecBuilder().build());
+        }
+
         EntityOperatorReconciler rcnclr = new EntityOperatorReconciler(
                 Reconciliation.DUMMY_RECONCILIATION,
                 ResourceUtils.dummyClusterOperatorConfig(),
                 supplier,
                 kafka,
-                VERSIONS,
                 CLUSTER_CA
         );
 
@@ -349,10 +372,14 @@ public class EntityOperatorReconcilerTest {
                     assertThat(saCaptor.getAllValues().size(), is(1));
                     assertThat(saCaptor.getValue(), is(notNullValue()));
 
-                    assertThat(operatorSecretCaptor.getAllValues().size(), is(1));
-                    assertThat(operatorSecretCaptor.getAllValues().get(0), is(nullValue()));
-                    assertThat(toSecretCaptor.getAllValues().size(), is(1));
-                    assertThat(toSecretCaptor.getAllValues().get(0), is(notNullValue()));
+                    if (cruiseControlEnabled) {
+                        assertThat(toSecretCaptor.getAllValues().size(), is(2));
+                        assertThat(toSecretCaptor.getAllValues().get(0), is(notNullValue()));
+                        assertThat(toSecretCaptor.getAllValues().get(1), is(notNullValue()));
+                    } else {
+                        assertThat(toSecretCaptor.getAllValues().size(), is(1));
+                        assertThat(toSecretCaptor.getAllValues().get(0), is(notNullValue()));
+                    }
                     assertThat(uoSecretCaptor.getAllValues().size(), is(1));
                     assertThat(uoSecretCaptor.getAllValues().get(0), is(nullValue()));
 
@@ -374,6 +401,9 @@ public class EntityOperatorReconcilerTest {
 
                     assertThat(depCaptor.getAllValues().size(), is(1));
                     assertThat(depCaptor.getValue(), is(notNullValue()));
+                    assertThat(depCaptor.getValue().getSpec().getTemplate().getMetadata().getAnnotations().get(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION), is("0"));
+                    assertThat(depCaptor.getValue().getSpec().getTemplate().getMetadata().getAnnotations().get(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_KEY_GENERATION), is("0"));
+                    assertThat(depCaptor.getValue().getSpec().getTemplate().getMetadata().getAnnotations().get(Annotations.ANNO_STRIMZI_SERVER_CERT_HASH), is("4d715cdd"));
 
                     async.flag();
                 })));
@@ -393,8 +423,7 @@ public class EntityOperatorReconcilerTest {
         ArgumentCaptor<ServiceAccount> saCaptor = ArgumentCaptor.forClass(ServiceAccount.class);
         when(mockSaOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), saCaptor.capture())).thenReturn(Future.succeededFuture());
 
-        ArgumentCaptor<Secret> operatorSecretCaptor = ArgumentCaptor.forClass(Secret.class);
-        when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorSecretName(NAME)), operatorSecretCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockSecretOps.getAsync(eq(NAMESPACE), eq(KafkaResources.entityUserOperatorSecretName(NAME)))).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> toSecretCaptor = ArgumentCaptor.forClass(Secret.class);
         when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorSecretName(NAME)), toSecretCaptor.capture())).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> uoSecretCaptor = ArgumentCaptor.forClass(Secret.class);
@@ -421,7 +450,7 @@ public class EntityOperatorReconcilerTest {
         when(mockDepOps.waitForObserved(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDepOps.readiness(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, "foo", 120, 30))
+        Kafka kafka = new KafkaBuilder(KAFKA)
                 .editSpec()
                     .withNewEntityOperator()
                         .withNewUserOperator()
@@ -435,7 +464,6 @@ public class EntityOperatorReconcilerTest {
                 ResourceUtils.dummyClusterOperatorConfig(),
                 supplier,
                 kafka,
-                VERSIONS,
                 CLUSTER_CA
         );
 
@@ -445,8 +473,6 @@ public class EntityOperatorReconcilerTest {
                     assertThat(saCaptor.getAllValues().size(), is(1));
                     assertThat(saCaptor.getValue(), is(notNullValue()));
 
-                    assertThat(operatorSecretCaptor.getAllValues().size(), is(1));
-                    assertThat(operatorSecretCaptor.getAllValues().get(0), is(nullValue()));
                     assertThat(toSecretCaptor.getAllValues().size(), is(1));
                     assertThat(toSecretCaptor.getAllValues().get(0), is(nullValue()));
                     assertThat(uoSecretCaptor.getAllValues().size(), is(1));
@@ -470,6 +496,9 @@ public class EntityOperatorReconcilerTest {
 
                     assertThat(depCaptor.getAllValues().size(), is(1));
                     assertThat(depCaptor.getValue(), is(notNullValue()));
+                    assertThat(depCaptor.getValue().getSpec().getTemplate().getMetadata().getAnnotations().get(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION), is("0"));
+                    assertThat(depCaptor.getValue().getSpec().getTemplate().getMetadata().getAnnotations().get(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_KEY_GENERATION), is("0"));
+                    assertThat(depCaptor.getValue().getSpec().getTemplate().getMetadata().getAnnotations().get(Annotations.ANNO_STRIMZI_SERVER_CERT_HASH), is("4d715cdd"));
 
                     async.flag();
                 })));
@@ -489,8 +518,6 @@ public class EntityOperatorReconcilerTest {
         ArgumentCaptor<ServiceAccount> saCaptor = ArgumentCaptor.forClass(ServiceAccount.class);
         when(mockSaOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), saCaptor.capture())).thenReturn(Future.succeededFuture());
 
-        ArgumentCaptor<Secret> operatorSecretCaptor = ArgumentCaptor.forClass(Secret.class);
-        when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorSecretName(NAME)), operatorSecretCaptor.capture())).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> toSecretCaptor = ArgumentCaptor.forClass(Secret.class);
         when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorSecretName(NAME)), toSecretCaptor.capture())).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> uoSecretCaptor = ArgumentCaptor.forClass(Secret.class);
@@ -517,7 +544,7 @@ public class EntityOperatorReconcilerTest {
         when(mockDepOps.waitForObserved(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDepOps.readiness(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, "foo", 120, 30))
+        Kafka kafka = new KafkaBuilder(KAFKA)
                 .editSpec()
                     .withNewEntityOperator()
                     .endEntityOperator()
@@ -529,7 +556,6 @@ public class EntityOperatorReconcilerTest {
                 ResourceUtils.dummyClusterOperatorConfig(),
                 supplier,
                 kafka,
-                VERSIONS,
                 CLUSTER_CA
         );
 
@@ -539,8 +565,6 @@ public class EntityOperatorReconcilerTest {
                     assertThat(saCaptor.getAllValues().size(), is(1));
                     assertThat(saCaptor.getValue(), is(nullValue()));
 
-                    assertThat(operatorSecretCaptor.getAllValues().size(), is(1));
-                    assertThat(operatorSecretCaptor.getAllValues().get(0), is(nullValue()));
                     assertThat(toSecretCaptor.getAllValues().size(), is(1));
                     assertThat(toSecretCaptor.getAllValues().get(0), is(nullValue()));
                     assertThat(uoSecretCaptor.getAllValues().size(), is(1));
@@ -583,8 +607,6 @@ public class EntityOperatorReconcilerTest {
         ArgumentCaptor<ServiceAccount> saCaptor = ArgumentCaptor.forClass(ServiceAccount.class);
         when(mockSaOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), saCaptor.capture())).thenReturn(Future.succeededFuture());
 
-        ArgumentCaptor<Secret> operatorSecretCaptor = ArgumentCaptor.forClass(Secret.class);
-        when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorSecretName(NAME)), operatorSecretCaptor.capture())).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> toSecretCaptor = ArgumentCaptor.forClass(Secret.class);
         when(mockSecretOps.reconcile(any(), eq(NAMESPACE), eq(KafkaResources.entityTopicOperatorSecretName(NAME)), toSecretCaptor.capture())).thenReturn(Future.succeededFuture());
         ArgumentCaptor<Secret> uoSecretCaptor = ArgumentCaptor.forClass(Secret.class);
@@ -611,14 +633,11 @@ public class EntityOperatorReconcilerTest {
         when(mockDepOps.waitForObserved(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDepOps.readiness(any(), eq(NAMESPACE), eq(KafkaResources.entityOperatorDeploymentName(NAME)), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
-        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, "foo", 120, 30);
-
         EntityOperatorReconciler rcnclr = new EntityOperatorReconciler(
                 Reconciliation.DUMMY_RECONCILIATION,
                 ResourceUtils.dummyClusterOperatorConfig(),
                 supplier,
-                kafka,
-                VERSIONS,
+                KAFKA,
                 CLUSTER_CA
         );
 
@@ -628,8 +647,6 @@ public class EntityOperatorReconcilerTest {
                     assertThat(saCaptor.getAllValues().size(), is(1));
                     assertThat(saCaptor.getValue(), is(nullValue()));
 
-                    assertThat(operatorSecretCaptor.getAllValues().size(), is(1));
-                    assertThat(operatorSecretCaptor.getAllValues().get(0), is(nullValue()));
                     assertThat(toSecretCaptor.getAllValues().size(), is(1));
                     assertThat(toSecretCaptor.getAllValues().get(0), is(nullValue()));
                     assertThat(uoSecretCaptor.getAllValues().size(), is(1));

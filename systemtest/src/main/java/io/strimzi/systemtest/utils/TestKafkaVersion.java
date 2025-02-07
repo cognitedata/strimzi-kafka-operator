@@ -29,11 +29,11 @@ public class TestKafkaVersion implements Comparable<TestKafkaVersion> {
     static {
         try {
             kafkaVersions = parseKafkaVersions(TestUtils.USER_PATH + "/../kafka-versions.yaml");
-            supportedKafkaVersions = kafkaVersions.stream().filter(TestKafkaVersion::isSupported).collect(Collectors.toList());
+            supportedKafkaVersions = getSupportedKafkaVersionsFromAllVersions(kafkaVersions);
             Collections.sort(kafkaVersions);
             Collections.sort(supportedKafkaVersions);
 
-            if (supportedKafkaVersions == null || supportedKafkaVersions.size() == 0) {
+            if (supportedKafkaVersions.isEmpty()) {
                 throw new Exception("There is no one Kafka version supported inside " + TestUtils.USER_PATH + "/../kafka-versions.yaml file");
             }
 
@@ -56,8 +56,8 @@ public class TestKafkaVersion implements Comparable<TestKafkaVersion> {
     @JsonProperty("format")
     String messageVersion;
 
-    @JsonProperty("zookeeper")
-    String zookeeperVersion;
+    @JsonProperty("metadata")
+    String metadataVersion;
 
     @JsonProperty("default")
     boolean isDefault;
@@ -71,7 +71,6 @@ public class TestKafkaVersion implements Comparable<TestKafkaVersion> {
                 "version='" + version + '\'' +
                 ", protocolVersion='" + protocolVersion + '\'' +
                 ", messageVersion='" + messageVersion + '\'' +
-                ", zookeeperVersion='" + zookeeperVersion + '\'' +
                 ", isDefault=" + isDefault +
                 ", isSupported=" + isSupported +
                 '}';
@@ -89,8 +88,8 @@ public class TestKafkaVersion implements Comparable<TestKafkaVersion> {
         return messageVersion;
     }
 
-    public String zookeeperVersion() {
-        return zookeeperVersion;
+    public String metadataVersion() {
+        return metadataVersion;
     }
 
     public boolean isDefault() {
@@ -172,6 +171,10 @@ public class TestKafkaVersion implements Comparable<TestKafkaVersion> {
 
     public static List<TestKafkaVersion> getSupportedKafkaVersions() {
         return supportedKafkaVersions;
+    }
+
+    public static List<TestKafkaVersion> getSupportedKafkaVersionsFromAllVersions(List<TestKafkaVersion> kafkaVersions) {
+        return kafkaVersions.stream().filter(TestKafkaVersion::isSupported).collect(Collectors.toList());
     }
 
     /**

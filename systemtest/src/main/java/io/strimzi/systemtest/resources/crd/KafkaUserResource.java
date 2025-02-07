@@ -8,10 +8,10 @@ import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.Crds;
-import io.strimzi.api.kafka.KafkaUserList;
-import io.strimzi.api.kafka.model.KafkaUser;
-import io.strimzi.systemtest.resources.ResourceType;
+import io.strimzi.api.kafka.model.user.KafkaUser;
+import io.strimzi.api.kafka.model.user.KafkaUserList;
 import io.strimzi.systemtest.resources.ResourceManager;
+import io.strimzi.systemtest.resources.ResourceType;
 
 import java.util.function.Consumer;
 
@@ -53,7 +53,7 @@ public class KafkaUserResource implements ResourceType<KafkaUser> {
         kafkaUserClient().inNamespace(kafkaUser.getMetadata().getNamespace()).resource(kafkaUser).update();
     }
 
-    public static void replaceUserResourceInSpecificNamespace(String resourceName, Consumer<KafkaUser> editor, String namespaceName) {
-        ResourceManager.replaceCrdResource(KafkaUser.class, KafkaUserList.class, resourceName, editor, namespaceName);
+    public static void replaceUserResourceInSpecificNamespace(String namespaceName, String resourceName, Consumer<KafkaUser> editor) {
+        ResourceManager.replaceCrdResource(namespaceName, KafkaUser.class, KafkaUserList.class, resourceName, editor);
     }
 }

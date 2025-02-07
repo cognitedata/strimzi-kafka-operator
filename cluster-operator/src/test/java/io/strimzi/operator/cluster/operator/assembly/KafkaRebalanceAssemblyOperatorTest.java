@@ -4,52 +4,53 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
-import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Secret;
+import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.strimzi.api.kafka.Crds;
-import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.KafkaRebalanceList;
-import io.strimzi.api.kafka.model.CruiseControlResources;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaBuilder;
-import io.strimzi.api.kafka.model.KafkaRebalance;
-import io.strimzi.api.kafka.model.KafkaRebalanceBuilder;
-import io.strimzi.api.kafka.model.KafkaRebalanceSpec;
-import io.strimzi.api.kafka.model.KafkaRebalanceSpecBuilder;
-import io.strimzi.api.kafka.model.balancing.KafkaRebalanceMode;
-import io.strimzi.api.kafka.model.status.ConditionBuilder;
-import io.strimzi.api.kafka.model.status.Condition;
-import io.strimzi.api.kafka.model.status.KafkaRebalanceStatus;
-import io.strimzi.api.kafka.model.balancing.KafkaRebalanceAnnotation;
-import io.strimzi.api.kafka.model.balancing.KafkaRebalanceState;
+import io.strimzi.api.kafka.model.common.Condition;
+import io.strimzi.api.kafka.model.common.ConditionBuilder;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaBuilder;
+import io.strimzi.api.kafka.model.kafka.cruisecontrol.CruiseControlResources;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
+import io.strimzi.api.kafka.model.rebalance.BrokerAndVolumeIdsBuilder;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalance;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceAnnotation;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceBuilder;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceMode;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceSpec;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceSpecBuilder;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceState;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceStatus;
+import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
+import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ResourceUtils;
-import io.strimzi.operator.cluster.model.CruiseControl;
-import io.strimzi.operator.common.model.InvalidResourceException;
 import io.strimzi.operator.cluster.model.NoSuchResourceException;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlApi;
-import io.strimzi.operator.common.model.cruisecontrol.CruiseControlEndpoints;
-import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlRestException;
-import io.strimzi.operator.cluster.operator.resource.cruisecontrol.MockCruiseControl;
-import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlRetriableConnectionException;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlApiImpl;
+import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlRestException;
+import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlRetriableConnectionException;
+import io.strimzi.operator.cluster.operator.resource.cruisecontrol.MockCruiseControl;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.TimeoutException;
+import io.strimzi.operator.common.model.InvalidResourceException;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
-import io.strimzi.operator.common.operator.resource.CrdOperator;
-import io.strimzi.operator.common.operator.resource.NoStackTraceTimeoutException;
-import io.strimzi.operator.common.operator.resource.ReconcileResult;
-import io.strimzi.operator.common.operator.resource.SecretOperator;
+import io.strimzi.operator.common.model.cruisecontrol.CruiseControlEndpoints;
+import io.strimzi.operator.common.operator.MockCertManager;
+import io.strimzi.platform.KubernetesVersion;
+import io.strimzi.test.ReadWriteUtils;
 import io.strimzi.test.TestUtils;
-import io.strimzi.test.mockkube2.MockKube2;
-import io.vertx.core.Future;
+import io.strimzi.test.mockkube3.MockKube3;
 import io.vertx.core.Vertx;
+import io.vertx.core.WorkerExecutor;
 import io.vertx.junit5.Checkpoint;
+import io.vertx.junit5.Timeout;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
 import org.junit.jupiter.api.AfterAll;
@@ -57,34 +58,50 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockserver.integration.ClientAndServer;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.Collections;
-import java.util.Optional;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
-@EnableKubernetesMockClient(crud = true)
 @ExtendWith(VertxExtension.class)
+@SuppressWarnings({"checkstyle:ClassFanOutComplexity"})
 public class KafkaRebalanceAssemblyOperatorTest {
     private static final String HOST = "localhost";
     private static final String RESOURCE_NAME = "my-rebalance";
-    private static final String CLUSTER_NAMESPACE = "cruise-control-namespace";
     private static final String CLUSTER_NAME = "kafka-cruise-control-test-cluster";
+    private static final Kafka KAFKA = new KafkaBuilder()
+            .withNewMetadata()
+                .withName(CLUSTER_NAME)
+                .withAnnotations(Map.of(Annotations.ANNO_STRIMZI_IO_NODE_POOLS, "enabled", Annotations.ANNO_STRIMZI_IO_KRAFT, "enabled"))
+            .endMetadata()
+            .withNewSpec()
+                .withNewKafka()
+                    .withListeners(new GenericKafkaListenerBuilder()
+                            .withName("plain")
+                            .withPort(9092)
+                            .withType(KafkaListenerType.INTERNAL)
+                            .withTls(false)
+                            .build())
+                .endKafka()
+                .withNewCruiseControl()
+                .endCruiseControl()
+            .endSpec()
+            .build();
     private static final KafkaRebalanceSpec EMPTY_KAFKA_REBALANCE_SPEC = new KafkaRebalanceSpecBuilder().build();
     private static final KafkaRebalanceSpec ADD_BROKER_KAFKA_REBALANCE_SPEC =
             new KafkaRebalanceSpecBuilder()
@@ -97,69 +114,91 @@ public class KafkaRebalanceAssemblyOperatorTest {
                     .withBrokers(3)
                     .build();
 
-    private static ClientAndServer ccServer;
-    // Injected by Fabric8 Mock Kubernetes Server
-    @SuppressWarnings("unused")
-    private KubernetesClient client;
-    private MockKube2 mockKube;
-
-    private CrdOperator<KubernetesClient, KafkaRebalance, KafkaRebalanceList> mockRebalanceOps;
-    private CrdOperator<KubernetesClient, Kafka, KafkaList> mockKafkaOps;
-    private SecretOperator mockSecretOps;
-    private KafkaRebalanceAssemblyOperator kcrao;
-    private ConfigMapOperator mockCmOps;
-
-    private final int replicas = 1;
-    private final String image = "my-kafka-image";
-    private final int healthDelay = 120;
-    private final int healthTimeout = 30;
-
-    private final String version = KafkaVersionTestUtils.DEFAULT_KAFKA_VERSION;
-    private final String ccImage = "my-cruise-control-image";
-
-    private final Kafka kafka =
-            new KafkaBuilder(ResourceUtils.createKafka(CLUSTER_NAMESPACE, CLUSTER_NAME, replicas, image, healthDelay, healthTimeout))
-                    .editSpec()
-                        .editKafka()
-                            .withVersion(version)
-                        .endKafka()
-                        .editOrNewCruiseControl()
-                            .withImage(ccImage)
-                        .endCruiseControl()
-                    .endSpec()
-                    .withNewStatus()
-                        .withObservedGeneration(1L)
-                        .withConditions(new ConditionBuilder()
-                                .withType("Ready")
-                                .withStatus("True")
-                                .build())
-                    .endStatus()
+    private static final KafkaRebalanceSpec REMOVE_DISKS_KAFKA_REBALANCE_SPEC =
+            new KafkaRebalanceSpecBuilder()
+                    .withMode(KafkaRebalanceMode.REMOVE_DISKS)
+                    .withMoveReplicasOffVolumes(
+                            new BrokerAndVolumeIdsBuilder()
+                                    .withBrokerId(0)
+                                    .withVolumeIds(1)
+                                    .build())
                     .build();
+    private static final PlatformFeaturesAvailability PFA = new PlatformFeaturesAvailability(false, KubernetesVersion.MINIMAL_SUPPORTED_VERSION);
+    private static KubernetesClient client;
+    private static MockKube3 mockKube;
+    private static Vertx vertx;
+    private static WorkerExecutor sharedWorkerExecutor;
+    private String namespace;
+    private KafkaRebalanceAssemblyOperator krao;
+    private ResourceOperatorSupplier supplier;
+
+    private static int cruiseControlPort;
+    private static File tlsKeyFile;
+    private static File tlsCrtFile;
+    private static MockCruiseControl cruiseControlServer;
 
     @BeforeAll
     public static void beforeAll() throws IOException {
-        ccServer = MockCruiseControl.server(CruiseControl.REST_API_PORT);
+        // Configure the Kubernetes Mock
+        mockKube = new MockKube3.MockKube3Builder()
+                .withKafkaCrd()
+                .withKafkaRebalanceCrd()
+                .withDeletionController()
+                .build();
+        mockKube.start();
+        client = mockKube.client();
+
+        vertx = Vertx.vertx();
+        sharedWorkerExecutor = vertx.createSharedWorkerExecutor("kubernetes-ops-pool");
+
+        // Configure Cruise Control mock
+        cruiseControlPort = TestUtils.getFreePort();
+        tlsKeyFile = ReadWriteUtils.tempFile(KafkaRebalanceAssemblyOperatorTest.class.getSimpleName(), ".key");
+        tlsCrtFile = ReadWriteUtils.tempFile(KafkaRebalanceAssemblyOperatorTest.class.getSimpleName(), ".crt");
+        
+        new MockCertManager().generateSelfSignedCert(tlsKeyFile, tlsCrtFile,
+            new Subject.Builder().withCommonName("Trusted Test CA").build(), 365);
+
+        cruiseControlServer = new MockCruiseControl(cruiseControlPort, tlsKeyFile, tlsCrtFile);
     }
 
     @AfterAll
     public static void afterAll() {
-        ccServer.stop();
+        sharedWorkerExecutor.close();
+        vertx.close();
+        mockKube.stop();
+        if (cruiseControlServer != null && cruiseControlServer.isRunning()) {
+            cruiseControlServer.stop();
+        }
     }
 
     @BeforeEach
-    public void beforeEach(Vertx vertx) {
-        ccServer.reset();
+    public void beforeEach(TestInfo testInfo) {
+        namespace = testInfo.getTestMethod().orElseThrow().getName().toLowerCase(Locale.ROOT);
+        // handling Kubernetes constraint for namespace limit name (63 characters)
+        if (namespace.length() > 63) {
+            namespace = namespace.substring(0, 63);
+        }
+        mockKube.prepareNamespace(namespace);
 
-        // Configure the Kubernetes Mock
-        mockKube = new MockKube2.MockKube2Builder(client)
-                .withKafkaRebalanceCrd()
-                .build();
-        mockKube.start();
+        if (cruiseControlServer != null && cruiseControlServer.isRunning()) {
+            cruiseControlServer.reset();
+        }
 
-        ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
+        supplier = new ResourceOperatorSupplier(vertx, client, ResourceUtils.adminClientProvider(),
+                ResourceUtils.kafkaAgentClientProvider(), ResourceUtils.metricsProvider(), PFA);
 
         // Override to inject mocked cruise control address so real cruise control not required
-        kcrao = new KafkaRebalanceAssemblyOperator(vertx, supplier, ResourceUtils.dummyClusterOperatorConfig()) {
+        krao = createKafkaRebalanceAssemblyOperator(ResourceUtils.dummyClusterOperatorConfig());
+    }
+
+    @AfterEach
+    public void afterEach() {
+        client.namespaces().withName(namespace).delete();
+    }
+
+    private KafkaRebalanceAssemblyOperator createKafkaRebalanceAssemblyOperator(ClusterOperatorConfig config) {
+        return new KafkaRebalanceAssemblyOperator(vertx, supplier, config, cruiseControlPort) {
             @Override
             public String cruiseControlHost(String clusterName, String clusterNamespace) {
                 return HOST;
@@ -167,31 +206,43 @@ public class KafkaRebalanceAssemblyOperatorTest {
 
             @Override
             public CruiseControlApi cruiseControlClientProvider(Secret ccSecret, Secret ccApiSecret, boolean apiAuthEnabled, boolean apiSslEnabled) {
-                return new CruiseControlApiImpl(vertx, 1, ccSecret, ccApiSecret, true, true);
-            }
-
-            @Override
-            protected long rebalancePollingTimerDelay() {
-                return 100;
+                return new CruiseControlApiImpl(1, ccSecret, ccApiSecret, true, true);
             }
         };
-
-        mockRebalanceOps = supplier.kafkaRebalanceOperator;
-        mockKafkaOps = supplier.kafkaOperator;
-        mockCmOps = supplier.configMapOperations;
-        mockSecretOps = supplier.secretOperations;
     }
 
-    @AfterEach
-    public void afterEach() {
-        mockKube.stop();
+    private void crdCreateKafka() {
+        Kafka kafka = new KafkaBuilder(KAFKA)
+                .withNewStatus()
+                    .withObservedGeneration(1L)
+                    .withConditions(new ConditionBuilder()
+                            .withType("Ready")
+                            .withStatus("True")
+                            .build())
+                .endStatus()
+                .build();
+
+        Crds.kafkaOperation(client).inNamespace(namespace).resource(kafka).create();
+        Crds.kafkaOperation(client).inNamespace(namespace).resource(kafka).updateStatus();
     }
 
-    private void mockSecretResources() {
-        when(mockSecretOps.getAsync(CLUSTER_NAMESPACE, CruiseControlResources.secretName(CLUSTER_NAME)))
-                .thenReturn(Future.succeededFuture(MockCruiseControl.CC_SECRET));
-        when(mockSecretOps.getAsync(CLUSTER_NAMESPACE, CruiseControlResources.apiSecretName(CLUSTER_NAME)))
-                .thenReturn(Future.succeededFuture(MockCruiseControl.CC_API_SECRET));
+    private void crdCreateCruiseControlSecrets() {
+        Secret ccSecret = new SecretBuilder(MockCruiseControl.CC_SECRET)
+                .editMetadata()
+                    .withName(CruiseControlResources.secretName(CLUSTER_NAME))
+                    .withNamespace(namespace)
+                .endMetadata()
+                .build();
+
+        Secret ccApiSecret = new SecretBuilder(MockCruiseControl.CC_API_SECRET)
+                .editMetadata()
+                    .withName(CruiseControlResources.apiSecretName(CLUSTER_NAME))
+                    .withNamespace(namespace)
+                .endMetadata()
+                .build();
+
+        client.secrets().inNamespace(namespace).resource(ccSecret).create();
+        client.secrets().inNamespace(namespace).resource(ccApiSecret).create();
     }
 
     /**
@@ -204,8 +255,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReady(context, 0, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReady(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -213,8 +264,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReady(context, 0, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReady(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
@@ -222,26 +273,32 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReady(context, 0, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReady(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
     }
 
-    private void krNewToProposalReady(VertxTestContext context, int pendingCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToProposalReadyRebalance} for description
+     */
+    @Test
+    public void testNewToProposalReadyRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReady(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
+    }
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
+    private void krNewToProposalReady(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr, String verbose) throws IOException, URISyntaxException {
+        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(0, endpoint, verbose);
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME))
-                .thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from 'New' directly to 'ProposalReady' (no pending calls in the Mock server)
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
                     checkpoint.flag();
                 }));
     }
@@ -260,32 +317,26 @@ public class KafkaRebalanceAssemblyOperatorTest {
      * 8. The KafkaRebalance resource moves to the 'ProposalReady' state
      */
     @Test
-    public void testKrNotReadyToProposalReadyOnSpecChange(VertxTestContext context) throws IOException, URISyntaxException {
-
-        // Setup the rebalance endpoint to get error about hard goals
-        MockCruiseControl.setupCCRebalanceBadGoalsError(ccServer, CruiseControlEndpoints.REBALANCE);
+    public void testKrNotReadyToProposalReadyOnSpecChange(VertxTestContext context) {
+        // Set up the rebalance endpoint to get error about hard goals
+        cruiseControlServer.setupCCRebalanceBadGoalsError(CruiseControlEndpoints.REBALANCE);
 
         KafkaRebalanceSpec kafkaRebalanceSpec = new KafkaRebalanceSpecBuilder()
                 .withGoals("DiskCapacityGoal", "CpuCapacityGoal")
                 .build();
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
-
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        // the Kafka cluster isn't deployed in the namespace
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 .onComplete(context.succeeding(v -> context.verify(() -> {
                     // the resource moved from New to NotReady due to the error
-                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
+                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).get();
                     assertThat(kr1, StateMatchers.hasState());
-                    Condition condition = kcrao.rebalanceStateCondition(kr1.getStatus());
+                    Condition condition = KafkaRebalanceUtils.rebalanceStateCondition(kr1.getStatus());
                     assertThat(condition, StateMatchers.hasStateInCondition(KafkaRebalanceState.NotReady, CruiseControlRestException.class,
                             "Error processing POST request '/rebalance' due to: " +
                                     "'java.lang.IllegalArgumentException: Missing hard goals [NetworkInboundCapacityGoal, DiskCapacityGoal, RackAwareGoal, NetworkOutboundCapacityGoal, CpuCapacityGoal, ReplicaCapacityGoal] " +
@@ -294,30 +345,28 @@ public class KafkaRebalanceAssemblyOperatorTest {
                 })))
                 .compose(v -> {
 
-                    ccServer.reset();
+                    cruiseControlServer.reset();
                     try {
-                        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-                        MockCruiseControl.setupCCRebalanceResponse(ccServer, 0, CruiseControlEndpoints.REBALANCE);
+                        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+                        cruiseControlServer.setupCCRebalanceResponse(0, CruiseControlEndpoints.REBALANCE, "true");
                     } catch (IOException | URISyntaxException e) {
                         context.failNow(e);
                     }
 
-                    KafkaRebalance updatedKafkaRebalance =  Crds.kafkaRebalanceOperation(client)
-                            .inNamespace(CLUSTER_NAMESPACE)
+                    Crds.kafkaRebalanceOperation(client)
+                            .inNamespace(namespace)
                             .withName(kr.getMetadata().getName())
-                            .edit(kr2 -> new KafkaRebalanceBuilder(kr2)
+                            .edit(currentKr -> new KafkaRebalanceBuilder(currentKr)
                                     .editSpec()
-                                    .withSkipHardGoalCheck(true)
+                                        .withSkipHardGoalCheck(true)
                                     .endSpec()
                                     .build());
 
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                           updatedKafkaRebalance);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource transitioned from 'NotReady' to 'ProposalReady'
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
                     checkpoint.flag();
                 }));
     }
@@ -334,8 +383,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalToProposalReadyRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalToProposalReady(context, 2, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToProposalReady(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -343,8 +392,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalToProposalReadyAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalToProposalReady(context, 2, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToProposalReady(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
@@ -352,39 +401,52 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalToProposalReadyRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalToProposalReady(context, 2, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToProposalReady(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
     }
 
-    private void krNewToPendingProposalToProposalReady(VertxTestContext context, int pendingCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToPendingProposalToProposalReadyRebalance} for description
+     */
+    @Test
+    public void testNewToPendingProposalToProposalReadyRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToProposalReady(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
+    }
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
+    private void krNewToPendingProposalToProposalReady(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr, String verbose) throws IOException, URISyntaxException {
+        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(1, endpoint, verbose);
+        cruiseControlServer.setupCCUserTasksResponseNoGoals(1, 0);
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME))
-                .thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 .onComplete(context.succeeding(v -> {
-                    // the resource moved from New to PendingProposal (due to the configured Mock server pending calls)
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal);
+                    // the resource moved from New to PendingProposal (proposal not ready yet due to the configured CC mock server pending calls)
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal);
                 }))
                 .compose(v -> {
                     // trigger another reconcile to process the PendingProposal state
-                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
-
-                    return kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr1);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
+                })
+                .onComplete(context.succeeding(v -> {
+                    // the resource stays in PendingProposal (proposal not ready yet due to the configured CC mock server pending calls)
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal);
+                }))
+                .compose(v -> {
+                    // trigger another reconcile to process the PendingProposal state
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from PendingProposal to ProposalReady
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
                     context.verify(() -> {
-                        KafkaRebalanceStatus rebalanceStatus = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get().getStatus();
-                        assertTrue(rebalanceStatus.getOptimizationResult().size() > 0);
+                        KafkaRebalanceStatus rebalanceStatus = Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).get().getStatus();
+                        assertFalse(rebalanceStatus.getOptimizationResult().isEmpty());
                         assertNotNull(rebalanceStatus.getSessionId());
                     });
                     checkpoint.flag();
@@ -404,8 +466,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalToStoppedRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalToStopped(context, 5, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToStopped(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -413,8 +475,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalToStoppedAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalToStopped(context, 5, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToStopped(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
@@ -422,46 +484,43 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalToStoppedRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalToStopped(context, 5, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToStopped(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
     }
 
-    private void krNewToPendingProposalToStopped(VertxTestContext context, int pendingCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToPendingProposalToStoppedRebalance} for description
+     */
+    @Test
+    public void testNewToPendingProposalToStoppedRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToStopped(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
+    }
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
+    private void krNewToPendingProposalToStopped(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr, String verbose) throws IOException, URISyntaxException {
+        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(5, endpoint, verbose);
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME))
-                .thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client, new Runnable() {
-            int count = 0;
-
-            @Override
-            public void run() {
-                if (++count == 4) {
-                    // after a while, apply the "stop" annotation to the resource in the PendingProposal state
-                    annotate(client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceAnnotation.stop);
-                }
-            }
-        });
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 .onComplete(context.succeeding(v -> {
-                    // the resource moved from New to PendingProposal (due to the configured Mock server pending calls)
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal);
+                    // the resource moved from New to PendingProposal (proposal not ready yet due to the configured CC mock server pending calls)
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal);
                 }))
                 .compose(v -> {
-                    // trigger another reconcile to process the PendingProposal state
-                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
+                    // apply the "stop" annotation to the resource in the PendingProposal state
+                    annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.stop);
 
-                    return kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr1);
+                    // trigger another reconcile to process the PendingProposal state
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
-                    // the resource moved from ProposalPending to Stopped
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.Stopped);
+                    // the resource moved from PendingProposal to Stopped
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Stopped);
                     checkpoint.flag();
                 }));
     }
@@ -486,8 +545,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalToStoppedAndRefreshRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalToStoppedAndRefresh(context, 2, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToStoppedAndRefresh(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -495,8 +554,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalToStoppedAndRefreshAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalToStoppedAndRefresh(context, 2, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToStoppedAndRefresh(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
@@ -504,71 +563,63 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalToStoppedAndRefreshRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalToStoppedAndRefresh(context, 2, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToStoppedAndRefresh(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
     }
 
-    private void krNewToPendingProposalToStoppedAndRefresh(VertxTestContext context, int pendingCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToPendingProposalToStoppedAndRefreshRebalance} for description
+     */
+    @Test
+    public void testNewToPendingProposalToStoppedAndRefreshRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalToStoppedAndRefresh(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
+    }
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
+    private void krNewToPendingProposalToStoppedAndRefresh(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr, String verbose) throws IOException, URISyntaxException {
+        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(2, endpoint, verbose);
+        cruiseControlServer.setupCCUserTasksResponseNoGoals(0, 0);
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client, new Runnable() {
-            int count = 0;
-
-            @Override
-            public void run() {
-                if (++count == 4) {
-                    // after a while, apply the "stop" annotation to the resource in the PendingProposal state
-                    annotate(client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceAnnotation.stop);
-                }
-            }
-        });
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(
-                new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                kr)
-                // the resource moved from New to PendingProposal (due to the configured Mock server pending calls)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
+                // the resource moved from New to PendingProposal (proposal not ready yet due to the configured CC mock server pending calls)
                 .onComplete(context.succeeding(v ->
-                        assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal)))
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal)))
                 .compose(v -> {
-                    // trigger another reconcile to process the PendingProposal state
-                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
+                    // apply the "stop" annotation to the resource in the PendingProposal state
+                    annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.stop);
 
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            kr1);
+                    // trigger another reconcile to process the PendingProposal state
+                    return krao.reconcile(
+                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
-                // the resource moved from ProposalPending to Stopped
+                // the resource moved from PendingProposal to Stopped
                 .onComplete(context.succeeding(v ->
-                        assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.Stopped)))
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Stopped)))
                 .compose(v -> {
                     // apply the "refresh" annotation to the resource in the Stopped state
-                    KafkaRebalance refreshedKr = annotate(client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceAnnotation.refresh);
+                    annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.refresh);
 
                     // trigger another reconcile to process the Stopped state
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            refreshedKr);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
-                // the resource moved from Stopped to PendingProposal
+                // the resource moved from Stopped to PendingProposal (proposal not ready yet due to the configured CC mock server pending calls)
                 .onComplete(context.succeeding(v ->
-                        assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal)))
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal)))
                 .compose(v -> {
                     // trigger another reconcile to process the PendingProposal state
-                    KafkaRebalance kr6 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
+                    Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).get();
 
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            kr6);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from PendingProposal to ProposalReady
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
                     checkpoint.flag();
                 }));
     }
@@ -590,8 +641,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToRebalancingToReadyRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReadyToRebalancingToReady(context, 0, 0, 0, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToReady(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -599,8 +650,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToRebalancingToReadyAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReadyToRebalancingToReady(context, 0, 0, 0, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToReady(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
@@ -608,8 +659,17 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToRebalancingToReadyRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReadyToRebalancingToReady(context, 0, 0, 0, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToReady(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
+    }
+
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToProposalReadyToRebalancingToReadyRebalance} for description
+     */
+    @Test
+    public void testNewToProposalReadyToRebalancingToReadyRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToReady(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
     }
 
     /**
@@ -629,8 +689,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testAutoApprovalNewToProposalReadyToRebalancingToReadyRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, true);
-        this.krNewToProposalReadyToRebalancingToReady(context, 0, 0, 0, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, true);
+        this.krNewToProposalReadyToRebalancingToReady(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -638,62 +698,63 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testAutoApprovalNewToProposalReadyToRebalancingToReadyAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, true);
-        this.krNewToProposalReadyToRebalancingToReady(context, 0, 0, 0, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, true);
+        this.krNewToProposalReadyToRebalancingToReady(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
      * See the {@link KafkaRebalanceAssemblyOperatorTest#testAutoApprovalNewToProposalReadyToRebalancingToReadyRebalance} for description
      */
     @Test
-    public void testAutoApprovalNewToProposalReadyToRebalancingToReadyRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, true);
-        this.krNewToProposalReadyToRebalancingToReady(context, 0, 0, 0, CruiseControlEndpoints.REMOVE_BROKER, kr);
+    public void testAutoApprovalNewToReadyRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, true);
+        this.krNewToProposalReadyToRebalancingToReady(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
     }
 
-    private void krNewToProposalReadyToRebalancingToReady(VertxTestContext context, int pendingCalls, int activeCalls, int inExecutionCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance and user tasks endpoints with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
-        MockCruiseControl.setupCCUserTasksResponseNoGoals(ccServer, activeCalls, inExecutionCalls);
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testAutoApprovalNewToProposalReadyToRebalancingToReadyRebalance} for description
+     */
+    @Test
+    public void testAutoApprovalNewToReadyRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, true);
+        this.krNewToProposalReadyToRebalancingToReady(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
+    }
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
+    private void krNewToProposalReadyToRebalancingToReady(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr, String verbose) throws IOException, URISyntaxException {
+        // Set up the rebalance and user tasks endpoints with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(0, endpoint, verbose);
+        cruiseControlServer.setupCCUserTasksResponseNoGoals(0, 0);
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 // the resource moved from 'New' to 'ProposalReady' directly (no pending calls in the Mock server)
                 .onComplete(context.succeeding(v ->
-                        assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady)))
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady)))
                 .compose(v -> {
 
                     // if "rebalance-auto-approval" annotation is set, no need for applying the "approve" annotation
                     // otherwise apply the "approve" annotation to the resource in the ProposalReady state
-                    KafkaRebalance approvedKr = Annotations.booleanAnnotation(kr, Annotations.ANNO_STRIMZI_IO_REBALANCE_AUTOAPPROVAL, false) ?
-                            kr :
-                            annotate(client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceAnnotation.approve);
+                    if (!Annotations.booleanAnnotation(kr, Annotations.ANNO_STRIMZI_IO_REBALANCE_AUTOAPPROVAL, false)) {
+                        annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.approve);
+                    }
 
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            approvedKr);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from ProposalReady to Rebalancing on approval
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.Rebalancing);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Rebalancing);
                 }))
                 .compose(v -> {
                     // trigger another reconcile to process the Rebalancing state
-                    KafkaRebalance kr4 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
-
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            kr4);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from Rebalancing to Ready
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.Ready);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Ready);
                     checkpoint.flag();
                 }));
     }
@@ -711,8 +772,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToReconciliationPausedRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReadyToReconciliationPaused(context, 0, 0, 0, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToReconciliationPaused(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -720,8 +781,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToReconciliationPausedAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReadyToReconciliationPaused(context, 0, 0, 0, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToReconciliationPaused(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
@@ -729,49 +790,52 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToReconciliationPausedRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReadyToReconciliationPaused(context, 0, 0, 0, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToReconciliationPaused(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
     }
 
-    private void krNewToProposalReadyToReconciliationPaused(VertxTestContext context, int pendingCalls, int activeCalls, int inExecutionCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance and user tasks endpoints with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
-        MockCruiseControl.setupCCUserTasksResponseNoGoals(ccServer, activeCalls, inExecutionCalls);
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToProposalReadyToReconciliationPausedRebalance} for description
+     */
+    @Test
+    public void testNewToProposalReadyToReconciliationPausedRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToReconciliationPaused(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
+    }
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
+    private void krNewToProposalReadyToReconciliationPaused(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr, String verbose) throws IOException, URISyntaxException {
+        // Set up the rebalance and user tasks endpoints with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(0, endpoint, verbose);
+        cruiseControlServer.setupCCUserTasksResponseNoGoals(0, 0);
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 // the resource moved from 'New' to 'ProposalReady' directly (no pending calls in the Mock server)
                 .onComplete(context.succeeding(v ->
-                        assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady)))
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady)))
                 .compose(v -> {
                     // set the `ReconciliationPaused` annotation as true
-
-                    KafkaRebalance kr2 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
-
-                    KafkaRebalance patchedKr = new KafkaRebalanceBuilder(kr2)
-                            .editMetadata()
-                            .addToAnnotations(Collections.singletonMap(Annotations.ANNO_STRIMZI_IO_PAUSE_RECONCILIATION, "true"))
-                            .endMetadata()
-                            .build();
+                    KafkaRebalance patchedKr =
+                            new KafkaRebalanceBuilder(Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).get())
+                                    .editMetadata()
+                                        .addToAnnotations(Collections.singletonMap(Annotations.ANNO_STRIMZI_IO_PAUSE_RECONCILIATION, "true"))
+                                    .endMetadata()
+                                    .build();
 
                     Crds.kafkaRebalanceOperation(client)
-                            .inNamespace(CLUSTER_NAMESPACE)
+                            .inNamespace(namespace)
                             .withName(kr.getMetadata().getName())
-                            .edit(kr3 -> patchedKr);
+                            .edit(currentKr -> patchedKr);
 
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            kr2);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from ProposalReady to ReconciliationPaused on pausing
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ReconciliationPaused);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ReconciliationPaused);
                     checkpoint.flag();
                 }));
     }
@@ -796,8 +860,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToRebalancingToReadyThenRefreshRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReadyToRebalancingToReadyThenRefresh(context, 0, 0, 0, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToReadyThenRefresh(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -805,8 +869,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToRebalancingToReadyThenRefreshAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReadyToRebalancingToReadyThenRefresh(context, 0, 0, 0, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToReadyThenRefresh(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
@@ -814,61 +878,128 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToRebalancingToReadyThenRefreshRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToProposalReadyToRebalancingToReadyThenRefresh(context, 0, 0, 0, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToReadyThenRefresh(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
     }
 
-    private void krNewToProposalReadyToRebalancingToReadyThenRefresh(VertxTestContext context, int pendingCalls, int activeCalls, int inExecutionCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance and user tasks endpoints with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
-        MockCruiseControl.setupCCUserTasksResponseNoGoals(ccServer, activeCalls, inExecutionCalls);
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToProposalReadyToRebalancingToReadyThenRefreshRebalance} for description
+     */
+    @Test
+    public void testNewToProposalReadyToRebalancingToReadyThenRefreshRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToReadyThenRefresh(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
+    }
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
+    private void krNewToProposalReadyToRebalancingToReadyThenRefresh(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr, String verbose) throws IOException, URISyntaxException {
+        // Set up the rebalance and user tasks endpoints with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(0, endpoint, verbose);
+        cruiseControlServer.setupCCUserTasksResponseNoGoals(0, 0);
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 // the resource moved from 'New' to 'ProposalReady' directly (no pending calls in the Mock server)
                 .onComplete(context.succeeding(v ->
-                        assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady)))
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady)))
                 .compose(v -> {
                     // apply the "approve" annotation to the resource in the ProposalReady state
-                    KafkaRebalance approvedKr = annotate(client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceAnnotation.approve);
+                    annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.approve);
 
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            approvedKr);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from ProposalReady to Rebalancing on approval
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.Rebalancing);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Rebalancing);
                 }))
                 .compose(v -> {
                     // trigger another reconcile to process the Rebalancing state
-                    KafkaRebalance kr4 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
-
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            kr4);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from Rebalancing to Ready
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.Ready);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Ready);
                 }))
                 .compose(v -> {
                     // apply the "refresh" annotation to the resource in the ProposalReady state
-                    KafkaRebalance refreshKr = annotate(client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceAnnotation.refresh);
+                    annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.refresh);
 
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            refreshKr);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from Ready to ProposalReady
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
+                    checkpoint.flag();
+                }));
+    }
+
+    /**
+     * Tests the transition from 'New' to 'Ready'
+     * The rebalance proposal is auto approved and the resource moves to 'Rebalancing'.
+     * Then the Rebalancing KafkaRebalance is refreshed and a moved to 'ProposalReady' again.
+     * Then the ProposalReady KafkaRebalance moves to Rebalancing again and finally to 'Ready'
+     *
+     * 1. A new KafkaRebalance resource is created with auto-approval annotation set; it is in the 'New' state
+     * 2. The operator requests a rebalance proposal through the Cruise Control REST API
+     * 3. The rebalance proposal is ready on the first call
+     * 4. The KafkaRebalance resource transitions to the 'ProposalReady' state
+     * 5. The operator requests the rebalance operation through the Cruise Control REST API
+     * 6. The rebalance operation is not done immediately; the operator starts polling the Cruise Control REST API
+     * 7. The KafkaRebalance resource moves to the 'Rebalancing' state
+     * 8. The KafkaRebalance resource is annotated with 'strimzi.io/rebalance=refresh' while the rebalancing is still in progress
+     * 9. The operator stops polling the Cruise Control REST API and requests a stop execution
+     * 10. The operator requests a new rebalance proposal through the Cruise Control REST API
+     * 11. The KafkaRebalance resource transitions to the 'ProposalReady' state again
+     * 12. The operator requests the rebalance operation through the Cruise Control REST API
+     * 13. The rebalance operation is not done immediately; the operator starts polling the Cruise Control REST API
+     * 14. The KafkaRebalance resource moves to the 'Rebalancing' state again
+     * 15. The rebalance operation is done
+     * 16. The KafkaRebalance resource moves to the 'Ready' state
+     */
+    @Test
+    public void krNewToProposalReadyToRebalancingToRefresh(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, true);
+
+        // Set up the rebalance and user tasks endpoints with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(0, CruiseControlEndpoints.REMOVE_BROKER, "true");
+        cruiseControlServer.setupCCUserTasksResponseNoGoals(0, 0);
+        cruiseControlServer.setupCCStopResponse();
+
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
+
+        Checkpoint checkpoint = context.checkpoint();
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
+                // the resource moved from 'New' to 'ProposalReady' directly (no pending calls in the Mock server)
+                .onComplete(context.succeeding(v ->
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady)))
+                .compose(v -> krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName())))
+                .onComplete(context.succeeding(v -> {
+                    // the resource moved from ProposalReady to Rebalancing on auto approval
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Rebalancing);
+                }))
+                .compose(v -> {
+                    // apply the "refresh" annotation to the resource in the Rebalancing state
+                    annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.refresh);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
+                })
+                .onComplete(context.succeeding(v -> {
+                    // the resource moved from Rebalancing to ProposalReady due to refresh annotation
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
+                }))
+                .compose(v -> krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName())))
+                .onComplete(context.succeeding(v -> {
+                    // the resource moved from ProposalReady to Rebalancing
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Rebalancing);
+                }))
+                .compose(v -> krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName())))
+                .onComplete(context.succeeding(v -> {
+                    // the resource moved from Rebalancing to Ready
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Ready);
                     checkpoint.flag();
                 }));
     }
@@ -882,12 +1013,12 @@ public class KafkaRebalanceAssemblyOperatorTest {
      * 4. The KafkaRebalance resource moves to the 'NotReady' state
      */
     @Test
-    public void testNewWithMissingHardGoalsRebalance(VertxTestContext context) throws IOException, URISyntaxException {
+    public void testNewWithMissingHardGoalsRebalance(VertxTestContext context) {
         KafkaRebalanceSpec kafkaRebalanceSpec = new KafkaRebalanceSpecBuilder()
                 .withGoals("DiskCapacityGoal", "CpuCapacityGoal")
                 .build();
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
         this.krNewWithMissingHardGoals(context, CruiseControlEndpoints.REBALANCE, kr);
     }
 
@@ -895,14 +1026,14 @@ public class KafkaRebalanceAssemblyOperatorTest {
      * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewWithMissingHardGoalsRebalance} for description
      */
     @Test
-    public void testNewWithMissingHardGoalsAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
+    public void testNewWithMissingHardGoalsAddBroker(VertxTestContext context) {
         KafkaRebalanceSpec kafkaRebalanceSpec = new KafkaRebalanceSpecBuilder()
                 .withMode(KafkaRebalanceMode.ADD_BROKERS)
                 .withBrokers(3)
                 .withGoals("DiskCapacityGoal", "CpuCapacityGoal")
                 .build();
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
         this.krNewWithMissingHardGoals(context, CruiseControlEndpoints.ADD_BROKER, kr);
     }
 
@@ -910,83 +1041,37 @@ public class KafkaRebalanceAssemblyOperatorTest {
      * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewWithMissingHardGoalsRebalance} for description
      */
     @Test
-    public void testNewWithMissingHardGoalsRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
+    public void testNewWithMissingHardGoalsRemoveBroker(VertxTestContext context) {
         KafkaRebalanceSpec kafkaRebalanceSpec = new KafkaRebalanceSpecBuilder()
                 .withMode(KafkaRebalanceMode.REMOVE_BROKERS)
                 .withBrokers(3)
                 .withGoals("DiskCapacityGoal", "CpuCapacityGoal")
                 .build();
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
         this.krNewWithMissingHardGoals(context, CruiseControlEndpoints.REMOVE_BROKER, kr);
     }
 
-    private void krNewWithMissingHardGoals(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance endpoint to get error about hard goals
-        MockCruiseControl.setupCCRebalanceBadGoalsError(ccServer, endpoint);
+    private void krNewWithMissingHardGoals(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr) {
+        // Set up the rebalance endpoint to get error about hard goals
+        cruiseControlServer.setupCCRebalanceBadGoalsError(endpoint);
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        // the Kafka cluster isn't deployed in the namespace
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 .onComplete(context.succeeding(v -> context.verify(() -> {
                     // the resource moved from New to NotReady due to the error
-                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
+                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).get();
                     assertThat(kr1, StateMatchers.hasState());
-                    Condition condition = kcrao.rebalanceStateCondition(kr1.getStatus());
+                    Condition condition = KafkaRebalanceUtils.rebalanceStateCondition(kr1.getStatus());
                     assertThat(condition, StateMatchers.hasStateInCondition(KafkaRebalanceState.NotReady, CruiseControlRestException.class,
                             "Error processing POST request '/rebalance' due to: " +
                                     "'java.lang.IllegalArgumentException: Missing hard goals [NetworkInboundCapacityGoal, DiskCapacityGoal, RackAwareGoal, NetworkOutboundCapacityGoal, CpuCapacityGoal, ReplicaCapacityGoal] " +
                                     "in the provided goals: [RackAwareGoal, ReplicaCapacityGoal]. " +
                                     "Add skip_hard_goal_check=true parameter to ignore this sanity check.'."));
-                    checkpoint.flag();
-                })));
-    }
-
-    @Test
-    public void testUnknownPropertyInSpec(VertxTestContext context) throws IOException, URISyntaxException {
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, 2, CruiseControlEndpoints.REBALANCE);
-
-        String yaml = "apiVersion: kafka.strimzi.io/v1beta2\n" +
-                "kind: KafkaRebalance\n" +
-                "metadata:\n" +
-                "  name: " + RESOURCE_NAME + "\n" +
-                "  namespace: " + CLUSTER_NAMESPACE + "\n" +
-                "  labels:\n" +
-                "    strimzi.io/cluster: " + CLUSTER_NAME + "\n" +
-                "spec:\n" +
-                "  unknown: \"property\"\n" +
-                "  goals:\n" +
-                "    - CpuCapacityGoal\n" +
-                "    - NetworkInboundCapacityGoal\n" +
-                "    - DiskCapacityGoal\n" +
-                "    - RackAwareGoal\n" +
-                "    - NetworkOutboundCapacityGoal\n" +
-                "    - ReplicaCapacityGoal\n";
-        KafkaRebalance kr = TestUtils.fromYamlString(yaml, KafkaRebalance.class);
-
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        // the Kafka cluster isn't deployed in the namespace
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
-
-        Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME), kr)
-                .onComplete(context.succeeding(v -> context.verify(() -> {
-                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(RESOURCE_NAME).get();
-                    assertThat(kr1, StateMatchers.hasState());
-                    Optional<Condition> condition = kr1.getStatus().getConditions().stream().filter(cond -> "UnknownFields".equals(cond.getReason())).findFirst();
-                    assertTrue(condition.isPresent());
-                    assertThat(condition.get().getStatus(), is("True"));
-                    assertThat(condition.get().getMessage(), is("Resource KafkaRebalance(cruise-control-namespace/my-rebalance) contains object at path spec with an unknown property: unknown"));
-                    assertThat(condition.get().getType(), is("Warning"));
                     checkpoint.flag();
                 })));
     }
@@ -1006,8 +1091,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
                 .withSkipHardGoalCheck(true)
                 .build();
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
-        this.krNewToProposalReadySkipHardGoals(context, 0, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
+        this.krNewToProposalReadySkipHardGoals(context, CruiseControlEndpoints.REBALANCE, kr);
     }
 
     /**
@@ -1022,8 +1107,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
                 .withSkipHardGoalCheck(true)
                 .build();
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
-        this.krNewToProposalReadySkipHardGoals(context, 0, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
+        this.krNewToProposalReadySkipHardGoals(context, CruiseControlEndpoints.ADD_BROKER, kr);
     }
 
     /**
@@ -1038,25 +1123,23 @@ public class KafkaRebalanceAssemblyOperatorTest {
                 .withSkipHardGoalCheck(true)
                 .build();
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
-        this.krNewToProposalReadySkipHardGoals(context, 0, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
+        this.krNewToProposalReadySkipHardGoals(context, CruiseControlEndpoints.REMOVE_BROKER, kr);
     }
 
-    private void krNewToProposalReadySkipHardGoals(VertxTestContext context, int pendingCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
+    private void krNewToProposalReadySkipHardGoals(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
+        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(0, endpoint, "true");
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from New directly to ProposalReady (no pending calls in the Mock server)
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
                     checkpoint.flag();
                 }));
     }
@@ -1075,63 +1158,60 @@ public class KafkaRebalanceAssemblyOperatorTest {
      * 8. The KafkaRebalance resource moves to the 'ProposalReady' state
      */
     @Test
-    public void testNewWithMissingHardGoalsAndRefreshRebalance(VertxTestContext context) throws IOException, URISyntaxException {
+    public void testNewWithMissingHardGoalsAndRefreshRebalance(VertxTestContext context) {
         KafkaRebalanceSpec kafkaRebalanceSpec = new KafkaRebalanceSpecBuilder()
                 .withGoals("DiskCapacityGoal", "CpuCapacityGoal")
                 .build();
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
-        this.krNewWithMissingHardGoalsAndRefresh(context, 0, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
+        this.krNewWithMissingHardGoalsAndRefresh(context, CruiseControlEndpoints.REBALANCE, kr);
     }
 
     /**
      * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewWithMissingHardGoalsAndRefreshRebalance} for description
      */
     @Test
-    public void testNewWithMissingHardGoalsAndRefreshAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
+    public void testNewWithMissingHardGoalsAndRefreshAddBroker(VertxTestContext context) {
         KafkaRebalanceSpec kafkaRebalanceSpec = new KafkaRebalanceSpecBuilder()
                 .withMode(KafkaRebalanceMode.ADD_BROKERS)
                 .withBrokers(3)
                 .withGoals("DiskCapacityGoal", "CpuCapacityGoal")
                 .build();
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
-        this.krNewWithMissingHardGoalsAndRefresh(context, 0, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
+        this.krNewWithMissingHardGoalsAndRefresh(context, CruiseControlEndpoints.ADD_BROKER, kr);
     }
 
     /**
      * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewWithMissingHardGoalsAndRefreshRebalance} for description
      */
     @Test
-    public void testNewWithMissingHardGoalsAndRefreshRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
+    public void testNewWithMissingHardGoalsAndRefreshRemoveBroker(VertxTestContext context) {
         KafkaRebalanceSpec kafkaRebalanceSpec = new KafkaRebalanceSpecBuilder()
                 .withMode(KafkaRebalanceMode.REMOVE_BROKERS)
                 .withBrokers(3)
                 .withGoals("DiskCapacityGoal", "CpuCapacityGoal")
                 .build();
 
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
-        this.krNewWithMissingHardGoalsAndRefresh(context, 0, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
+        this.krNewWithMissingHardGoalsAndRefresh(context, CruiseControlEndpoints.REMOVE_BROKER, kr);
     }
 
-    private void krNewWithMissingHardGoalsAndRefresh(VertxTestContext context, int pendingCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance endpoint to get error about hard goals
-        MockCruiseControl.setupCCRebalanceBadGoalsError(ccServer, endpoint);
+    private void krNewWithMissingHardGoalsAndRefresh(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr) {
+        // Set up the rebalance endpoint to get error about hard goals
+        cruiseControlServer.setupCCRebalanceBadGoalsError(endpoint);
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        // the Kafka cluster isn't deployed in the namespace
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 .onComplete(context.succeeding(v -> context.verify(() -> {
                     // the resource moved from New to NotReady due to the error
-                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
+                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).get();
                     assertThat(kr1, StateMatchers.hasState());
-                    Condition condition = kcrao.rebalanceStateCondition(kr1.getStatus());
+                    Condition condition = KafkaRebalanceUtils.rebalanceStateCondition(kr1.getStatus());
                     assertThat(condition, StateMatchers.hasStateInCondition(KafkaRebalanceState.NotReady, CruiseControlRestException.class,
                             "Error processing POST request '/rebalance' due to: " +
                                     "'java.lang.IllegalArgumentException: Missing hard goals [NetworkInboundCapacityGoal, DiskCapacityGoal, RackAwareGoal, NetworkOutboundCapacityGoal, CpuCapacityGoal, ReplicaCapacityGoal] " +
@@ -1140,35 +1220,33 @@ public class KafkaRebalanceAssemblyOperatorTest {
                 })))
                 .compose(v -> {
 
-                    ccServer.reset();
+                    cruiseControlServer.reset();
                     try {
-                        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-                        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
+                        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+                        cruiseControlServer.setupCCRebalanceResponse(0, endpoint, "true");
                     } catch (IOException | URISyntaxException e) {
                         context.failNow(e);
                     }
 
                     // set the skip hard goals check flag
                     Crds.kafkaRebalanceOperation(client)
-                            .inNamespace(CLUSTER_NAMESPACE)
+                            .inNamespace(namespace)
                             .withName(kr.getMetadata().getName())
-                            .edit(kr2 -> new KafkaRebalanceBuilder(kr2)
+                            .edit(currentKr -> new KafkaRebalanceBuilder(currentKr)
                                     .editSpec()
                                         .withSkipHardGoalCheck(true)
                                     .endSpec()
                                     .build());
 
                     // apply the "refresh" annotation to the resource in the NotReady state
-                    KafkaRebalance annotatedPatchedKr = annotate(client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceAnnotation.refresh);
+                    annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.refresh);
 
                     // trigger another reconcile to process the NotReady state
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            annotatedPatchedKr);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource transitioned from 'NotReady' to 'ProposalReady'
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady);
                     checkpoint.flag();
                 }));
     }
@@ -1184,8 +1262,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalDeleteRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalDelete(context, 2, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalDelete(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -1193,8 +1271,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalDeleteAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalDelete(context, 2, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalDelete(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
@@ -1202,50 +1280,159 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToPendingProposalDeleteRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalDelete(context, 2, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalDelete(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
     }
 
-    private void krNewToPendingProposalDelete(VertxTestContext context, int pendingCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToPendingProposalDeleteRebalance} for description
+     */
+    @Test
+    public void testNewToPendingProposalDeleteRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToPendingProposalDelete(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
+    }
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
+    private void krNewToPendingProposalDelete(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr, String verbose) throws IOException, URISyntaxException {
+        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(1, endpoint, verbose);
+        cruiseControlServer.setupCCUserTasksResponseNoGoals(1, 0);
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client, new Runnable() {
-            int count = 0;
-
-            @Override
-            public void run() {
-                if (++count == 4) {
-                    // delete the KafkaRebalance resource while on PendingProposal
-                    Crds.kafkaRebalanceOperation(client)
-                            .inNamespace(CLUSTER_NAMESPACE)
-                            .withName(kr.getMetadata().getName())
-                            .delete();
-                }
-            }
-        });
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
                 // the resource moved from 'New' to 'PendingProposal' (due to the configured Mock server pending calls)
                 .onComplete(context.succeeding(v ->
-                        assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal)))
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal)))
                 .compose(v -> {
                     // trigger another reconcile to process the PendingProposal state
-                    KafkaRebalance currentKR = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
-
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            currentKR);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
+                })
+                .onComplete(context.succeeding(v ->
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.PendingProposal)))
+                .compose(v -> {
+                    // trigger another reconcile to process the PendingProposal state
+                    Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).delete();
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> context.verify(() -> {
                     // the resource should not exist anymore
-                    KafkaRebalance currentKR = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
+                    KafkaRebalance currentKR = Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).get();
                     assertThat(currentKR, is(nullValue()));
+                    checkpoint.flag();
+                })));
+    }
+
+    /**
+     * Tests the transition from 'Rebalancing' to 'NotReady' due to a user task not existing and an error
+     * on re-issuing the optimization proposal request (i.e. brokers don't exist during the "remove-broker" operation)
+     *
+     * 1. A new KafkaRebalance resource is created; it is in the Rebalancing state
+     * 2. The operator requests the status of the corresponding user task through the Cruise Control REST API
+     * 3. The user task doesn't exist anymore and a new optimization proposal request is sent
+     * 4. The response from Cruise Control has an error and the KafkaRebalance resource moves to the 'NotReady' state
+     */
+    @Test
+    public void testRebalancingToNotReadyRemoveBroker(VertxTestContext context) {
+        cruiseControlServer.setupUserTasktoEmpty();
+        cruiseControlServer.setupCCBrokerDoesNotExist(CruiseControlEndpoints.REMOVE_BROKER, "true");
+        this.krToNotReadyRemoveBrokers(context, "test-session-id", false, KafkaRebalanceState.Rebalancing);
+    }
+
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testRebalancingToNotReadyRemoveBroker} for description
+     * but assuming the PendingProposal as initial state for the KafkaRebalance custom resource
+     */
+    @Test
+    public void testPendingProposalToNotReadyRemoveBroker(VertxTestContext context) {
+        cruiseControlServer.setupUserTasktoEmpty();
+        cruiseControlServer.setupCCBrokerDoesNotExist(CruiseControlEndpoints.REMOVE_BROKER, "true");
+        this.krToNotReadyRemoveBrokers(context, "test-session-id", false, KafkaRebalanceState.PendingProposal);
+    }
+
+    /**
+     * Tests the transition from 'PendingProposal' to 'NotReady' due to an error (i.e. brokers don't exist during the "remove-broker" operation)
+     * on re-issuing the optimization proposal request when applying the "strimzi.io/rebalance: refresh" annotation
+     *
+     * 1. A new KafkaRebalance resource is created; it is in the PendingProposal state
+     * 2. The "strimzi.io/rebalance: refresh" annotation is applied and an optimization proposal request is sent
+     * 3. The response from Cruise Control has an error and the KafkaRebalance resource moves to the 'NotReady' state
+     */
+    @Test
+    @Timeout(value = 60, timeUnit = TimeUnit.MINUTES)
+    public void testPendingProposalToNotReadyRemoveBrokerWithRefresh(VertxTestContext context) {
+        cruiseControlServer.setupCCBrokerDoesNotExist(CruiseControlEndpoints.REMOVE_BROKER, "true");
+        this.krToNotReadyRemoveBrokers(context, "test-session-id", true, KafkaRebalanceState.PendingProposal);
+    }
+
+    /**
+     * Tests the transition from 'PendingProposal' to 'NotReady' due to an error (i.e. brokers don't exist during the "remove-broker" operation)
+     * on re-issuing the optimization proposal request because the user task session ID is empty and status cannot be checked
+     *
+     * 1. A new KafkaRebalance resource is created; it is in the PendingProposal state
+     * 2. Because of missing user task session ID, an optimization proposal request is sent again
+     * 3. The response from Cruise Control has an error and the KafkaRebalance resource moves to the 'NotReady' state
+     */
+    @Test
+    @Timeout(value = 60, timeUnit = TimeUnit.MINUTES)
+    public void testPendingProposalToNotReadyRemoveBrokerWithNoSessionId(VertxTestContext context) {
+        cruiseControlServer.setupCCBrokerDoesNotExist(CruiseControlEndpoints.REMOVE_BROKER, "true");
+        this.krToNotReadyRemoveBrokers(context, null, false, KafkaRebalanceState.PendingProposal);
+    }
+
+    /**
+     * Tests the transition from 'Rebalancing' to 'NotReady' due to an error (i.e. brokers don't exist during the "remove-broker" operation)
+     * on re-issuing the optimization proposal request by applying the "strimzi.io/rebalance: refresh" annotation
+     *
+     * 1. A new KafkaRebalance resource is created; it is in the Rebalancing state
+     * 2. The "strimzi.io/rebalance: refresh" annotation is applied and an optimization proposal request is sent
+     * 3. The response from Cruise Control has an error and the KafkaRebalance resource moves to the 'NotReady' state
+     */
+    @Test
+    @Timeout(value = 60, timeUnit = TimeUnit.MINUTES)
+    public void testRebalancingToNotReadyRemoveBrokerWithRefresh(VertxTestContext context) {
+        cruiseControlServer.setupCCStopResponse();
+        cruiseControlServer.setupCCBrokerDoesNotExist(CruiseControlEndpoints.REMOVE_BROKER, "true");
+        this.krToNotReadyRemoveBrokers(context, "test-session-id", true, KafkaRebalanceState.Rebalancing);
+    }
+
+    private void krToNotReadyRemoveBrokers(VertxTestContext context, String sessionId, boolean refresh, KafkaRebalanceState initialState) {
+        KafkaRebalanceBuilder builder =
+                new KafkaRebalanceBuilder(createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false));
+
+        if (refresh) {
+            builder.editMetadata()
+                        .addToAnnotations(Annotations.ANNO_STRIMZI_IO_REBALANCE, "refresh")
+                    .endMetadata();
+        }
+        KafkaRebalance kr = builder
+                .withNewStatus()
+                    .withObservedGeneration(1L)
+                    .withSessionId(sessionId)
+                    .withConditions(new ConditionBuilder()
+                            .withType(initialState.name())
+                            .withStatus("True")
+                            .build())
+                .endStatus()
+                .build();
+
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).updateStatus();
+
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
+
+        Checkpoint checkpoint = context.checkpoint();
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
+                .onComplete(context.succeeding(v -> context.verify(() -> {
+                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).get();
+                    assertThat(kr1, StateMatchers.hasState());
+                    Condition condition = KafkaRebalanceUtils.rebalanceStateCondition(kr1.getStatus());
+                    assertThat(condition, StateMatchers.hasStateInCondition(KafkaRebalanceState.NotReady, IllegalArgumentException.class,
+                            "Some/all brokers specified don't exist"));
                     checkpoint.flag();
                 })));
     }
@@ -1268,8 +1455,8 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToRebalancingToStoppedRebalance(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalDelete(context, 0, 0, 2, CruiseControlEndpoints.REBALANCE, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToStopped(context, CruiseControlEndpoints.REBALANCE, kr, "true");
     }
 
     /**
@@ -1277,70 +1464,64 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNewToProposalReadyToRebalancingToStoppedAddBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalDelete(context, 0, 0, 2, CruiseControlEndpoints.ADD_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, ADD_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToStopped(context, CruiseControlEndpoints.ADD_BROKER, kr, "true");
     }
 
     /**
      * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToProposalReadyToRebalancingToStoppedRebalance} for description
      */
     @Test
+    @Timeout(value = 60, timeUnit = TimeUnit.MINUTES)
     public void testNewToProposalReadyToRebalancingToStoppedRemoveBroker(VertxTestContext context) throws IOException, URISyntaxException {
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
-        this.krNewToPendingProposalDelete(context, 0, 0, 2, CruiseControlEndpoints.REMOVE_BROKER, kr);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_BROKER_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToStopped(context, CruiseControlEndpoints.REMOVE_BROKER, kr, "true");
     }
 
-    private void krNewToPendingProposalDelete(VertxTestContext context, int pendingCalls, int activeCalls, int inExecutionCalls, CruiseControlEndpoints endpoint, KafkaRebalance kr) throws IOException, URISyntaxException {
-        // Setup the rebalance and user tasks endpoints with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, pendingCalls, endpoint);
-        MockCruiseControl.setupCCUserTasksResponseNoGoals(ccServer, activeCalls, inExecutionCalls);
-        MockCruiseControl.setupCCStopResponse(ccServer);
+    /**
+     * See the {@link KafkaRebalanceAssemblyOperatorTest#testNewToProposalReadyToRebalancingToStoppedRebalance} for description
+     */
+    @Test
+    public void testNewToProposalReadyToRebalancingToStoppedRemoveDisks(VertxTestContext context) throws IOException, URISyntaxException {
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, REMOVE_DISKS_KAFKA_REBALANCE_SPEC, false);
+        this.krNewToProposalReadyToRebalancingToStopped(context, CruiseControlEndpoints.REMOVE_DISKS, kr, null);
+    }
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client, new Runnable() {
-            int count = 0;
+    private void krNewToProposalReadyToRebalancingToStopped(VertxTestContext context, CruiseControlEndpoints endpoint, KafkaRebalance kr, String verbose) throws IOException, URISyntaxException {
+        // Set up the rebalance and user tasks endpoints with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(0, endpoint, verbose);
+        cruiseControlServer.setupCCUserTasksResponseNoGoals(0, 2);
+        cruiseControlServer.setupCCStopResponse();
 
-            @Override
-            public void run() {
-                if (++count == 6) {
-                    // after a while, apply the "stop" annotation to the resource in the Rebalancing state
-                    annotate(client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceAnnotation.stop);
-                }
-            }
-        });
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(
-                new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                kr)
-                // the resource moved from New to ProposalReady directly (no pending calls in the Mock server)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()))
+                // the resource moved from New to ProposalReady directly (no pending calls in the CC mock server)
                 .onComplete(context.succeeding(v ->
-                        assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady)))
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.ProposalReady)))
                 .compose(v -> {
                     // apply the "approve" annotation to the resource in the ProposalReady state
-                    KafkaRebalance approvedKr = annotate(client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceAnnotation.approve);
+                    annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.approve);
 
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            approvedKr);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 // the resource moved from ProposalReady to Rebalancing on approval
                 .onComplete(context.succeeding(v ->
-                        assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.Rebalancing)))
+                        assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Rebalancing)))
                 .compose(v -> {
-                    // trigger another reconcile to process the Rebalancing state
-                    KafkaRebalance kr5 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(kr.getMetadata().getName()).get();
+                    // apply the "stop" annotation to the resource in the Rebalancing state
+                    annotate(client, namespace, kr.getMetadata().getName(), KafkaRebalanceAnnotation.stop);
 
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, kr.getMetadata().getName()),
-                            kr5);
+                    // trigger another reconcile to process the Rebalancing state
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from Rebalancing to Stopped
-                    assertState(context, client, CLUSTER_NAMESPACE, kr.getMetadata().getName(), KafkaRebalanceState.Stopped);
+                    assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Stopped);
                     checkpoint.flag();
                 }));
     }
@@ -1354,24 +1535,72 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNoKafkaCluster(VertxTestContext context) {
-
-        KafkaRebalance kr =
-                createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        // the Kafka cluster isn't deployed in the namespace
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(null));
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(
-                new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME),
-                kr).onComplete(context.succeeding(v -> context.verify(() -> {
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
+                .onComplete(context.succeeding(v -> context.verify(() -> {
                     // the resource moved from New to NotReady due to the error
-                    assertState(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME,
+                    assertState(context, client, namespace, RESOURCE_NAME,
                             KafkaRebalanceState.NotReady, NoSuchResourceException.class,
-                            "Kafka resource '" + CLUSTER_NAME + "' identified by label '" + Labels.STRIMZI_CLUSTER_LABEL + "' does not exist in namespace " + CLUSTER_NAMESPACE  + ".");
+                            "Kafka resource '" + CLUSTER_NAME + "' identified by label '" + Labels.STRIMZI_CLUSTER_LABEL + "' does not exist in namespace " + namespace + ".");
+                    checkpoint.flag();
+                })));
+    }
+
+    /**
+     * Tests the scenario when the Kafka cluster to which the KafkaRebalance resource belongs does not match the custom
+     * resource selector of this operator. In this case, the operator should not do anything and return null status (as
+     * null status means that the status will nto be updated). This is important to avoid conflict between the operator
+     * actively managing this rebalance and other operators.
+     */
+    @Test
+    public void testKafkaClusterNotMatchingSelector(VertxTestContext context) {
+        Kafka k = new KafkaBuilder()
+                .withNewMetadata()
+                    .withName(CLUSTER_NAME)
+                    .withNamespace(namespace)
+                    .withLabels(Map.of("selector", "not-matching"))
+                .endMetadata()
+                .withNewSpec()
+                    .withNewKafka()
+                        .withListeners(new GenericKafkaListenerBuilder().withName("tls").withTls().withPort(9093).withType(KafkaListenerType.INTERNAL).build())
+                    .endKafka()
+                    .withNewCruiseControl()
+                    .endCruiseControl()
+                .endSpec()
+                .withNewStatus()
+                    .withObservedGeneration(1L)
+                    .withConditions(new ConditionBuilder()
+                            .withType("Ready")
+                            .withStatus("True")
+                            .build())
+                .endStatus()
+                .build();
+        Crds.kafkaOperation(client).inNamespace(namespace).resource(k).create();
+        Crds.kafkaOperation(client).inNamespace(namespace).resource(k).updateStatus();
+
+        KafkaRebalance kr = new KafkaRebalanceBuilder(createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false))
+                .editMetadata()
+                .withName(CLUSTER_NAME).withGeneration(1L)
+                .endMetadata()
+                .withNewStatus()
+                    .withObservedGeneration(1L)
+                    .withConditions(new ConditionBuilder()
+                            .withType(KafkaRebalanceState.Rebalancing.name())
+                            .withStatus("True")
+                            .build())
+                .endStatus()
+                .build();
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).updateStatus();
+
+        Checkpoint checkpoint = context.checkpoint();
+        krao = createKafkaRebalanceAssemblyOperator(ClusterOperatorConfig.buildFromMap(Map.of(ClusterOperatorConfig.CUSTOM_RESOURCE_SELECTOR.key(), "selector=matching"), KafkaVersionTestUtils.getKafkaVersionLookup()));
+        krao.reconcileKafkaRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME), kr)
+                .onComplete(context.succeeding(v -> context.verify(() -> {
+                    assertThat(v, is(nullValue()));
                     checkpoint.flag();
                 })));
     }
@@ -1386,61 +1615,44 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testKafkaRebalanceStaysReadyWhenComplete(VertxTestContext context) {
-
-        KafkaRebalance kr = createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, kr.getMetadata().getName(), client);
-        when(mockCmOps.getAsync(CLUSTER_NAMESPACE, RESOURCE_NAME)).thenReturn(Future.succeededFuture(new ConfigMap()));
-
-        kr = new KafkaRebalanceBuilder(kr)
+        KafkaRebalance kr = new KafkaRebalanceBuilder(createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false))
                 .withNewStatus()
                     .withObservedGeneration(1L)
                     .withConditions(new ConditionBuilder()
-                        .withType("Ready")
-                        .withStatus("True")
-                        .build())
+                            .withType(KafkaRebalanceState.Ready.name())
+                            .withStatus("True")
+                            .build())
                 .endStatus()
                 .build();
 
-        KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).updateStatus();
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).updateStatus();
 
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
         Checkpoint checkpoint = context.checkpoint();
 
-        kcrao.reconcileRebalance(
-                new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME),
-                        kr1).onComplete(context.succeeding(v -> context.verify(() -> {
-                            assertState(context, client, CLUSTER_NAMESPACE, kr1.getMetadata().getName(), KafkaRebalanceState.Ready);
-                        })))
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
+                .onComplete(context.succeeding(v -> context.verify(() -> assertState(context, client, namespace, kr.getMetadata().getName(), KafkaRebalanceState.Ready))))
                 .compose(v -> {
-                    KafkaRebalance kr2 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(RESOURCE_NAME).get();
-                    Kafka kafkaPatch = new KafkaBuilder(ResourceUtils.createKafka(CLUSTER_NAMESPACE, CLUSTER_NAME, replicas, image, healthDelay, healthTimeout))
-                            .editSpec()
-                                .editKafka()
-                                    .withVersion(version)
-                                .endKafka()
-                                .editOrNewCruiseControl()
-                                    .withImage(ccImage)
-                                .endCruiseControl()
-                            .endSpec()
+
+                    Kafka kafkaPatch = new KafkaBuilder(Crds.kafkaOperation(client).inNamespace(namespace).withName(CLUSTER_NAME).get())
                             .withNewStatus()
                                 .withObservedGeneration(1L)
                                 .withConditions(new ConditionBuilder()
-                                    .withType("NotReady")
-                                    .withStatus("True")
-                                    .build())
+                                        .withType("NotReady")
+                                        .withStatus("True")
+                                        .build())
                             .endStatus()
                             .build();
-                    when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafkaPatch));
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME),
-                            kr2);
+
+                    Crds.kafkaOperation(client).inNamespace(namespace).resource(kafkaPatch).updateStatus();
+
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from ProposalReady to Rebalancing on approval
-                    assertState(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME, KafkaRebalanceState.Ready);
+                    assertState(context, client, namespace, RESOURCE_NAME, KafkaRebalanceState.Ready);
                     checkpoint.flag();
                 }));
     }
@@ -1451,62 +1663,54 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testKafkaClusterNotMatchingLabelSelector(VertxTestContext context) {
-        KafkaRebalance kr =
-                createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
 
-        ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
-        mockKafkaOps = supplier.kafkaOperator;
-        mockRebalanceOps = supplier.kafkaRebalanceOperator;
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
 
         ClusterOperatorConfig config = new ClusterOperatorConfig.ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup())
                 .with(ClusterOperatorConfig.OPERATION_TIMEOUT_MS.key(), "120000")
                 .with(ClusterOperatorConfig.CUSTOM_RESOURCE_SELECTOR.key(), Map.of("selectorLabel", "value").entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.joining(","))).build();
 
-        kcrao = new KafkaRebalanceAssemblyOperator(Vertx.vertx(), supplier, config);
+        krao = new KafkaRebalanceAssemblyOperator(Vertx.vertx(), supplier, config, cruiseControlPort);
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(
-                new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME),
-                kr).onComplete(context.succeeding(v -> context.verify(() -> {
-                    // The labels of the Kafka resource do not match the => the KafkaRebalance should not be reconciled and the
-                    // rebalance ops should have no interactions.
-                    verifyNoInteractions(mockRebalanceOps);
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
+                .onComplete(context.succeeding(v -> context.verify(() -> {
+                    KafkaRebalance currentKr = Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(kr.getMetadata().getName()).get();
+                    // The labels of the Kafka resource do not match the => the KafkaRebalance is skipped and status not updated
+                    assertThat(currentKr.getStatus(), is(nullValue()));
                     checkpoint.flag();
                 })));
     }
 
     @Test
     public void testRebalanceUsesUnknownProperty(VertxTestContext context) throws IOException, URISyntaxException {
-        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, 0, CruiseControlEndpoints.REBALANCE);
+        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+        cruiseControlServer.setupCCRebalanceResponse(0, CruiseControlEndpoints.REBALANCE, "true");
 
         String rebalanceString = "apiVersion: kafka.strimzi.io/v1beta2\n" +
                 "kind: KafkaRebalance\n" +
                 "metadata:\n" +
                 "  name: " + RESOURCE_NAME + "\n" +
-                "  namespace: " + CLUSTER_NAMESPACE + "\n" +
+                "  namespace: " + namespace + "\n" +
                 "  labels:\n" +
                 "    strimzi.io/cluster: " + CLUSTER_NAME + "\n" +
                 "spec:\n" +
                 "  unknown: \"value\"";
 
-        KafkaRebalance kr = TestUtils.fromYamlString(rebalanceString, KafkaRebalance.class);
+        KafkaRebalance kr = ReadWriteUtils.readObjectFromYamlString(rebalanceString, KafkaRebalance.class);
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME))
-                .thenReturn(Future.succeededFuture(kafka));
-
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
                 .onComplete(context.succeeding(v -> {
                     // the resource moved from 'New' directly to 'ProposalReady' (no pending calls in the Mock server)
-                    assertState(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME, KafkaRebalanceState.ProposalReady);
-                    assertValidationCondition(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME, "UnknownFields");
+                    assertState(context, client, namespace, RESOURCE_NAME, KafkaRebalanceState.ProposalReady);
+                    assertValidationCondition(context, client, namespace, RESOURCE_NAME, "UnknownFields");
                     checkpoint.flag();
                 }));
     }
@@ -1521,38 +1725,31 @@ public class KafkaRebalanceAssemblyOperatorTest {
 
     @Test
     public void testCruiseControlDisabled(VertxTestContext context) {
-
         // build a Kafka cluster without the cruiseControl definition
-        Kafka kafka =
-                new KafkaBuilder(ResourceUtils.createKafka(CLUSTER_NAMESPACE, CLUSTER_NAME, replicas, image, healthDelay, healthTimeout))
-                        .editSpec()
-                            .editKafka()
-                                .withVersion(version)
-                            .endKafka()
-                        .endSpec()
-                        .withNewStatus()
-                            .withObservedGeneration(1L)
-                            .withConditions(new ConditionBuilder()
-                                    .withType("Ready")
-                                    .withStatus("True")
-                                    .build())
-                        .endStatus()
-                        .build();
+        Kafka kafka = new KafkaBuilder(KAFKA)
+                .editSpec()
+                    .withCruiseControl(null)
+                .endSpec()
+                .withNewStatus()
+                    .withObservedGeneration(1L)
+                    .withConditions(new ConditionBuilder()
+                            .withType("Ready")
+                            .withStatus("True")
+                            .build())
+                .endStatus()
+                .build();
 
-        KafkaRebalance kr =
-                createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        // the Kafka cluster doesn't have the Cruise Control deployment
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        Crds.kafkaOperation(client).inNamespace(namespace).resource(kafka).create();
+        Crds.kafkaOperation(client).inNamespace(namespace).resource(kafka).updateStatus();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
                 .onComplete(context.succeeding(v -> context.verify(() -> {
                     // the resource moved from New to NotReady due to the error
-                    assertState(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME,
+                    assertState(context, client, namespace, RESOURCE_NAME,
                             KafkaRebalanceState.NotReady, InvalidResourceException.class,
                             "Kafka resource lacks 'cruiseControl' declaration");
                     checkpoint.flag();
@@ -1561,79 +1758,96 @@ public class KafkaRebalanceAssemblyOperatorTest {
 
     @Test
     public void testCruiseControlDisabledToEnabledBehaviour(VertxTestContext context) {
-
         // build a Kafka cluster without the cruiseControl definition
-        Kafka kafka =
-                new KafkaBuilder(ResourceUtils.createKafka(CLUSTER_NAMESPACE, CLUSTER_NAME, replicas, image, healthDelay, healthTimeout))
-                        .editSpec()
-                            .editKafka()
-                                .withVersion(version)
-                            .endKafka()
-                        .endSpec()
-                        .withNewStatus()
-                            .withObservedGeneration(1L)
-                            .withConditions(new ConditionBuilder()
-                                    .withType("Ready")
-                                    .withStatus("True")
-                                    .build())
-                        .endStatus()
-                        .build();
+        Kafka kafka = new KafkaBuilder(KAFKA)
+                .editSpec()
+                    .withCruiseControl(null)
+                .endSpec()
+                .withNewStatus()
+                    .withObservedGeneration(1L)
+                    .withConditions(new ConditionBuilder()
+                            .withType("Ready")
+                            .withStatus("True")
+                            .build())
+                .endStatus()
+                .build();
 
-        KafkaRebalance kr =
-                createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        // the Kafka cluster doesn't have the Cruise Control deployment
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        Crds.kafkaOperation(client).inNamespace(namespace).resource(kafka).create();
+        Crds.kafkaOperation(client).inNamespace(namespace).resource(kafka).updateStatus();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
             .onComplete(context.succeeding(v -> context.verify(() -> {
                 // the resource moved from New to NotReady due to the error
-                assertState(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME,
+                assertState(context, client, namespace, RESOURCE_NAME,
                         KafkaRebalanceState.NotReady, InvalidResourceException.class,
                         "Kafka resource lacks 'cruiseControl' declaration");
             })))
                 .compose(v -> {
                     try {
-                        // Setup the rebalance endpoint with the number of pending calls before a response is received.
-                        MockCruiseControl.setupCCRebalanceResponse(ccServer, 0, CruiseControlEndpoints.REBALANCE);
+                        // Set up the rebalance endpoint with the number of pending calls before a response is received.
+                        cruiseControlServer.setupCCRebalanceResponse(0, CruiseControlEndpoints.REBALANCE, "true");
                     } catch (IOException | URISyntaxException e) {
                         context.failNow(e);
                     }
 
-                    Kafka kafkaPatch = new KafkaBuilder(ResourceUtils.createKafka(CLUSTER_NAMESPACE, CLUSTER_NAME, replicas, image, healthDelay, healthTimeout))
+                    Kafka kafkaPatch = new KafkaBuilder(Crds.kafkaOperation(client).inNamespace(namespace).withName(CLUSTER_NAME).get())
                             .editSpec()
-                                .editKafka()
-                                     .withVersion(version)
-                                .endKafka()
-                                .editOrNewCruiseControl()
-                                    .withImage(ccImage)
+                                .withNewCruiseControl()
                                 .endCruiseControl()
                             .endSpec()
-                            .withNewStatus()
-                            .withObservedGeneration(1L)
-                            .withConditions(new ConditionBuilder()
-                                    .withType("Ready")
-                                    .withStatus("True")
-                                    .build())
-                            .endStatus()
                             .build();
 
-                    when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafkaPatch));
-                    mockSecretResources();
-                    mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
+                    Crds.kafkaOperation(client).inNamespace(namespace).resource(kafkaPatch).update();
+                    crdCreateCruiseControlSecrets();
 
                     // trigger another reconcile to process the NotReady state
-                    return kcrao.reconcileRebalance(
-                            new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME),
-                            kr);
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME));
                 })
                 .onComplete(context.succeeding(v -> {
                     // the resource transitioned from 'NotReady' to 'ProposalReady'
-                    assertState(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME, KafkaRebalanceState.ProposalReady);
+                    assertState(context, client, namespace, RESOURCE_NAME, KafkaRebalanceState.ProposalReady);
+                    checkpoint.flag();
+                }));
+    }
+
+    @Test
+    public void shouldGenerateNewProposalWhenUserTaskNotFound(VertxTestContext context) throws IOException, URISyntaxException {
+        cruiseControlServer.setupCCRebalanceResponse(2, CruiseControlEndpoints.REBALANCE, "true");
+
+        KafkaRebalance kr = new KafkaRebalanceBuilder(createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, true))
+                .withNewStatus()
+                .withObservedGeneration(1L)
+                .withConditions(new ConditionBuilder()
+                        .withType(KafkaRebalanceState.ProposalReady.name())
+                        .withStatus("True")
+                        .build())
+                .endStatus()
+                .build();
+
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).updateStatus();
+
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
+
+        Checkpoint checkpoint = context.checkpoint();
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
+                .onComplete(context.succeeding(v -> {
+                    // the resource moved to `Rebalancing` since auto-approval annotation is set on the resource
+                    assertState(context, client, namespace, RESOURCE_NAME, KafkaRebalanceState.Rebalancing);
+                }))
+                .compose(v -> {
+                    // Sets a user_tasks response with an empty task list simulating CC restart
+                    cruiseControlServer.setupUserTasktoEmpty();
+                    return krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, kr.getMetadata().getName()));
+                })
+                .onComplete(context.succeeding(v -> {
+                    // the resource transitioned from 'Rebalancing' to 'PendingProposal'
+                    assertState(context, client, namespace, RESOURCE_NAME, KafkaRebalanceState.PendingProposal);
                     checkpoint.flag();
                 }));
     }
@@ -1647,20 +1861,16 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testNoKafkaClusterInKafkaRebalanceLabel(VertxTestContext context) {
+        KafkaRebalance kr = createKafkaRebalance(namespace, null, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
 
-        KafkaRebalance kr =
-                createKafkaRebalance(CLUSTER_NAMESPACE, null, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
-
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
             .onComplete(context.succeeding(v -> context.verify(() -> {
                 // the resource moved from New to NotReady due to the error
-                assertState(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME,
+                assertState(context, client, namespace, RESOURCE_NAME,
                         KafkaRebalanceState.NotReady, InvalidResourceException.class,
                         "Resource lacks label '" + Labels.STRIMZI_CLUSTER_LABEL + "': No cluster related to a possible rebalance.");
                 checkpoint.flag();
@@ -1675,27 +1885,25 @@ public class KafkaRebalanceAssemblyOperatorTest {
      * 3. The operator doesn't get a response on time; the resource moves to NotReady
      */
     @Test
-    public void testCruiseControlTimingOut(VertxTestContext context) throws IOException, URISyntaxException {
-
-        // Setup the rebalance endpoint with the number of pending calls before a response is received
+    public void testCruiseControlTimingOut(VertxTestContext context) {
+        // Set up the rebalance endpoint with the number of pending calls before a response is received
         // and with a delay on response higher than the client timeout to test timing out
-        MockCruiseControl.setupCCRebalanceResponse(ccServer, 0, 10, CruiseControlEndpoints.REBALANCE);
+        cruiseControlServer.setupCCRebalanceResponse(0, 10, CruiseControlEndpoints.REBALANCE, "true");
 
         KafkaRebalance kr =
-                createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+                createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
 
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
             .onComplete(context.succeeding(v -> {
                 // the resource moved from New to NotReady (mocked Cruise Control didn't reply on time)
-                assertState(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME,
-                        KafkaRebalanceState.NotReady, NoStackTraceTimeoutException.class,
+                assertState(context, client, namespace, RESOURCE_NAME,
+                        KafkaRebalanceState.NotReady, TimeoutException.class,
                         "The timeout period of 1000ms has been exceeded while executing POST");
                 checkpoint.flag();
             }));
@@ -1710,98 +1918,70 @@ public class KafkaRebalanceAssemblyOperatorTest {
      */
     @Test
     public void testCruiseControlNotReachable(VertxTestContext context) {
-
         // stop the mocked Cruise Control server to make it unreachable
-        ccServer.stop();
+        cruiseControlServer.stop();
 
-        KafkaRebalance kr =
-                createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
+        KafkaRebalance kr = createKafkaRebalance(namespace, CLUSTER_NAME, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false);
 
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
+        crdCreateKafka();
+        crdCreateCruiseControlSecrets();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME), kr)
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
             .onComplete(context.succeeding(v -> {
                 try {
-                    ccServer = MockCruiseControl.server(CruiseControl.REST_API_PORT);
-                } catch (IOException e) {
-                    context.failNow(e);
+                    cruiseControlServer = new MockCruiseControl(cruiseControlPort, tlsKeyFile, tlsCrtFile);
+                } catch (Throwable t) {
+                    context.failNow(t);
                 }
                 // the resource moved from 'New' to 'NotReady' (mocked Cruise Control not reachable)
-                assertState(context, client, CLUSTER_NAMESPACE, RESOURCE_NAME,
+                assertState(context, client, namespace, RESOURCE_NAME,
                         KafkaRebalanceState.NotReady, CruiseControlRetriableConnectionException.class,
-                        "Connection refused");
+                        "java.net.ConnectException");
                 checkpoint.flag();
             }));
     }
 
     /**
-     * Tests an intra-broker disk balance on a Kakfa deployment without a JBOD configuration.
-     *
-     * 1. A new KafkaRebalance resource is created with rebalanceDisk=true for a Kafka cluster without a JBOD configuration.
-     * 2. The operator sets an "InvalidResourceException" error instead of requesting a proposal since
-     *    intra-broker balancing only applies to Kafka deployments that use JBOD storage with multiple disks.
-     * 4. The KafkaRebalance resource moves to the 'NotReady' state
+     * Test a template KafkaRebalance custom resource that has to be just ignored by
+     * the KafkaRebalanceAssemblyOperator without updating its state
      */
     @Test
-    public void testIntraBrokerDiskBalanceWithoutJbodConfig(VertxTestContext context) {
-        KafkaRebalanceSpec kafkaRebalanceSpec = new KafkaRebalanceSpecBuilder()
-                .withRebalanceDisk(true)
+    public void testRebalanceTemplate(VertxTestContext context) {
+        KafkaRebalance kr = new KafkaRebalanceBuilder(createKafkaRebalance(namespace, null, RESOURCE_NAME, EMPTY_KAFKA_REBALANCE_SPEC, false))
+                .editMetadata()
+                    .addToAnnotations(Annotations.ANNO_STRIMZI_IO_REBALANCE_TEMPLATE, "true")
+                .endMetadata()
                 .build();
 
-        KafkaRebalance kr =
-                createKafkaRebalance(CLUSTER_NAMESPACE, CLUSTER_NAME, RESOURCE_NAME, kafkaRebalanceSpec, false);
-
-        Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).resource(kr).create();
-
-        // the Kafka cluster isn't deployed in the namespace
-        when(mockKafkaOps.getAsync(CLUSTER_NAMESPACE, CLUSTER_NAME)).thenReturn(Future.succeededFuture(kafka));
-        mockSecretResources();
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, CLUSTER_NAMESPACE, RESOURCE_NAME, client);
+        Crds.kafkaRebalanceOperation(client).inNamespace(namespace).resource(kr).create();
 
         Checkpoint checkpoint = context.checkpoint();
-        kcrao.reconcileRebalance(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, CLUSTER_NAMESPACE, RESOURCE_NAME), kr)
-                .onComplete(context.succeeding(v -> context.verify(() -> {
-                    // the resource moved from New to NotReady due to the error
-                    KafkaRebalance kr1 = Crds.kafkaRebalanceOperation(client).inNamespace(CLUSTER_NAMESPACE).withName(RESOURCE_NAME).get();
-                    assertThat(kr1, StateMatchers.hasState());
-                    Condition condition = kcrao.rebalanceStateCondition(kr1.getStatus());
-                    assertThat(condition.getReason(), is("InvalidResourceException"));
-                    assertThat(condition.getMessage(), is("Cannot set rebalanceDisk=true for Kafka clusters with a non-JBOD storage config. " +
-                            "Intra-broker balancing only applies to Kafka deployments that use JBOD storage with multiple disks."));
+        krao.reconcile(new Reconciliation("test-trigger", KafkaRebalance.RESOURCE_KIND, namespace, RESOURCE_NAME))
+                .onComplete(context.succeeding(v -> {
+                    KafkaRebalance kafkaRebalance = Crds.kafkaRebalanceOperation(client).inNamespace(namespace).withName(RESOURCE_NAME).get();
+                    assertThat(kafkaRebalance, not(StateMatchers.hasState()));
                     checkpoint.flag();
-                })));
+                }));
     }
 
     /**
      * annotate the KafkaRebalance, patch the (mocked) server with the resource and then return the annotated resource
      */
-    private KafkaRebalance annotate(KubernetesClient kubernetesClient, String namespace, String resource, KafkaRebalanceAnnotation annotationValue) {
-        KafkaRebalance kafkaRebalance = Crds.kafkaRebalanceOperation(kubernetesClient).inNamespace(namespace).withName(resource).get();
-
-        KafkaRebalance patchedKr = new KafkaRebalanceBuilder(kafkaRebalance)
+    private void annotate(KubernetesClient kubernetesClient, String namespace, String resource, KafkaRebalanceAnnotation annotationValue) {
+        Crds.kafkaRebalanceOperation(kubernetesClient).inNamespace(namespace).withName(resource).edit(kr -> new KafkaRebalanceBuilder(kr)
                 .editMetadata()
                     .addToAnnotations(Annotations.ANNO_STRIMZI_IO_REBALANCE, annotationValue.toString())
                 .endMetadata()
-                .build();
-
-        Crds.kafkaRebalanceOperation(kubernetesClient)
-                .inNamespace(namespace)
-                .withName(resource)
-                .edit(kr -> patchedKr);
-
-        return patchedKr;
+                .build());
     }
 
     private void assertState(VertxTestContext context, KubernetesClient kubernetesClient, String namespace, String resource, KafkaRebalanceState state) {
         context.verify(() -> {
             KafkaRebalance kafkaRebalance = Crds.kafkaRebalanceOperation(kubernetesClient).inNamespace(namespace).withName(resource).get();
             assertThat(kafkaRebalance, StateMatchers.hasState());
-            Condition condition = kcrao.rebalanceStateCondition(kafkaRebalance.getStatus());
+            Condition condition = KafkaRebalanceUtils.rebalanceStateCondition(kafkaRebalance.getStatus());
             assertThat(Collections.singletonList(condition), StateMatchers.hasStateInConditions(state));
         });
     }
@@ -1819,7 +1999,7 @@ public class KafkaRebalanceAssemblyOperatorTest {
             KafkaRebalance kafkaRebalance = Crds.kafkaRebalanceOperation(kubernetesClient).inNamespace(namespace).withName(resource).get();
 
             assertThat(kafkaRebalance, StateMatchers.hasState());
-            Condition condition = kcrao.rebalanceStateCondition(kafkaRebalance.getStatus());
+            Condition condition = KafkaRebalanceUtils.rebalanceStateCondition(kafkaRebalance.getStatus());
             assertThat(condition, StateMatchers.hasStateInCondition(state, reason, message));
         });
     }
@@ -1835,51 +2015,6 @@ public class KafkaRebalanceAssemblyOperatorTest {
                 .endMetadata()
                 .withSpec(kafkaRebalanceSpec)
                 .build();
-    }
-
-    private void mockRebalanceOperator(CrdOperator<KubernetesClient, KafkaRebalance, KafkaRebalanceList> mockRebalanceOps, ConfigMapOperator mockCmOps,
-                                       String namespace, String resource, KubernetesClient client) {
-        mockRebalanceOperator(mockRebalanceOps, mockCmOps, namespace, resource, client, null);
-    }
-
-    private void mockRebalanceOperator(CrdOperator<KubernetesClient, KafkaRebalance, KafkaRebalanceList> mockRebalanceOps,
-                                       ConfigMapOperator mockCmOps, String namespace, String resource, KubernetesClient client, Runnable getAsyncFunction) {
-
-
-        when(mockRebalanceOps.getAsync(namespace, resource)).thenAnswer(invocation -> {
-            try {
-                if (getAsyncFunction != null) {
-                    getAsyncFunction.run();
-                }
-                return Future.succeededFuture(Crds.kafkaRebalanceOperation(client)
-                        .inNamespace(namespace)
-                        .withName(resource)
-                        .get());
-            } catch (Exception e) {
-                return Future.failedFuture(e);
-            }
-        });
-        when(mockRebalanceOps.updateStatusAsync(any(), any(KafkaRebalance.class))).thenAnswer(invocation -> {
-            try {
-                return Future.succeededFuture(Crds.kafkaRebalanceOperation(client)
-                        .resource(invocation.getArgument(1))
-                        .replaceStatus());
-            } catch (Exception e) {
-                return Future.failedFuture(e);
-            }
-        });
-        when(mockCmOps.reconcile(any(), eq(CLUSTER_NAMESPACE), eq(RESOURCE_NAME), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new ConfigMap())));
-
-        when(mockRebalanceOps.patchAsync(any(), any(KafkaRebalance.class))).thenAnswer(invocation -> {
-            try {
-                return Future.succeededFuture(Crds.kafkaRebalanceOperation(client)
-                        .inNamespace(namespace)
-                        .withName(resource)
-                        .edit(kr -> invocation.getArgument(1)));
-            } catch (Exception e) {
-                return Future.failedFuture(e);
-            }
-        });
     }
 
     private static class StateMatchers extends AbstractResourceStateMatchers {

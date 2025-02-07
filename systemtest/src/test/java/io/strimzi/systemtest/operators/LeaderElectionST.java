@@ -10,24 +10,22 @@ import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.coordination.v1.Lease;
 import io.strimzi.systemtest.AbstractST;
 import io.strimzi.systemtest.Environment;
+import io.strimzi.systemtest.annotations.IsolatedTest;
+import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.operator.BundleResource;
 import io.strimzi.systemtest.resources.operator.specific.HelmResource;
-import io.strimzi.systemtest.storage.TestStorage;
 import io.strimzi.systemtest.utils.StUtils;
 import io.strimzi.systemtest.utils.kubeUtils.objects.PodUtils;
-import io.strimzi.test.annotations.IsolatedTest;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Collections;
 
-import static io.strimzi.systemtest.Constants.ACCEPTANCE;
-import static io.strimzi.systemtest.Constants.REGRESSION;
+import static io.strimzi.systemtest.TestTags.REGRESSION;
 import static io.strimzi.systemtest.resources.ResourceManager.kubeClient;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -48,7 +46,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *
  * <a href="https://strimzi.io/docs/operators/in-development/configuring.html#assembly-using-multiple-cluster-operator-replicas-str">the documentation</a>
  */
-
 @Tag(REGRESSION)
 public class LeaderElectionST extends AbstractST {
 
@@ -62,13 +59,10 @@ public class LeaderElectionST extends AbstractST {
     private static final String LEADER_MESSAGE = "I'm the new leader";
 
     @IsolatedTest
-    @Tag(ACCEPTANCE)
-    void testLeaderElection(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext);
-
+    void testLeaderElection() {
         // create CO with 2 replicas, wait for Deployment readiness and leader election
-        clusterOperator = clusterOperator.defaultInstallation(extensionContext)
-            .withExtensionContext(extensionContext)
+        clusterOperator = clusterOperator.defaultInstallation()
+            .withExtensionContext(ResourceManager.getTestContext())
             .withReplicas(2)
             .createInstallation()
             .runInstallation();
@@ -100,15 +94,13 @@ public class LeaderElectionST extends AbstractST {
     }
 
     @IsolatedTest
-    void testLeaderElectionDisabled(ExtensionContext extensionContext) {
+    void testLeaderElectionDisabled() {
         // Currently there is no way how to disable LeaderElection when deploying CO via Helm (duplicated envs)
         assumeTrue(!Environment.isHelmInstall());
 
-        final TestStorage testStorage = new TestStorage(extensionContext);
-
         // create CO with 1 replicas and with disabled leader election, wait for Deployment readiness
-        clusterOperator = clusterOperator.defaultInstallation(extensionContext)
-            .withExtensionContext(extensionContext)
+        clusterOperator = clusterOperator.defaultInstallation()
+            .withExtensionContext(ResourceManager.getTestContext())
             .withExtraEnvVars(Collections.singletonList(LEADER_DISABLED_ENV))
             .createInstallation()
             .runInstallation();

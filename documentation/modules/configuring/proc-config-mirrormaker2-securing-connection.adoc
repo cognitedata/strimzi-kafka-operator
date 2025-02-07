@@ -65,7 +65,6 @@ metadata:
 spec:
   kafka:
     version: {DefaultKafkaVersion}
-    replicas: 1
     listeners:
       - name: tls
         port: 9093
@@ -81,20 +80,6 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
-      inter.broker.protocol.version: "{DefaultInterBrokerVersion}"
-    storage:
-      type: jbod
-      volumes:
-      - id: 0
-        type: persistent-claim
-        size: 100Gi
-        deleteClaim: false
-  zookeeper:
-    replicas: 1
-    storage:
-      type: persistent-claim
-      size: 100Gi
-      deleteClaim: false
   entityOperator:
     topicOperator: {}
     userOperator: {}
@@ -110,7 +95,6 @@ metadata:
 spec:
   kafka:
     version: {DefaultKafkaVersion}
-    replicas: 1
     listeners:
       - name: tls
         port: 9093
@@ -126,20 +110,6 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
-      inter.broker.protocol.version: "{DefaultInterBrokerVersion}"
-    storage:
-      type: jbod
-      volumes:
-        - id: 0
-          type: persistent-claim
-          size: 100Gi
-          deleteClaim: false
-  zookeeper:
-    replicas: 1
-    storage:
-      type: persistent-claim
-      size: 100Gi
-      deleteClaim: false
   entityOperator:
     topicOperator: {}
     userOperator: {}
@@ -336,7 +306,7 @@ spec:
       tls: # <1>
         trustedCertificates:
           - secretName: my-source-cluster-cluster-ca-cert
-            certificate: ca.crt
+            pattern: "*.crt"
       authentication: # <2>
         type: tls
         certificateAndKey:
@@ -348,7 +318,7 @@ spec:
       tls: # <3>
         trustedCertificates:
           - secretName: my-target-cluster-cluster-ca-cert
-            certificate: ca.crt
+            pattern: "*.crt"
       authentication: # <4>
         type: tls
         certificateAndKey:

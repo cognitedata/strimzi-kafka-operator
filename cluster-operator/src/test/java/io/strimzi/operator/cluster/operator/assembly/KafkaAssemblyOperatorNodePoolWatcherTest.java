@@ -10,21 +10,21 @@ import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watcher;
-import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaBuilder;
-import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
-import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaBuilder;
+import io.strimzi.api.kafka.model.kafka.KafkaList;
+import io.strimzi.api.kafka.model.kafka.PersistentClaimStorageBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePool;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePoolBuilder;
 import io.strimzi.api.kafka.model.nodepool.ProcessRoles;
-import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.CrdOperator;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.vertx.core.Vertx;
 import org.junit.jupiter.api.Test;
 
@@ -41,31 +41,26 @@ public class KafkaAssemblyOperatorNodePoolWatcherTest {
     private static final String NAMESPACE = "my-namespace";
     private static final String CLUSTER_NAME = "my-cluster";
     private static final Kafka KAFKA = new KafkaBuilder()
-                .withNewMetadata()
-                    .withName(CLUSTER_NAME)
-                    .withNamespace(NAMESPACE)
-                    .withLabels(Map.of("selector", "matching"))
-                    .withAnnotations(Map.of(Annotations.ANNO_STRIMZI_IO_NODE_POOLS, "enabled"))
-                .endMetadata()
-                .withNewSpec()
-                    .withNewKafka()
-                        .withReplicas(3)
-                        .withListeners(new GenericKafkaListenerBuilder()
-                                .withName("plain")
-                                .withPort(9092)
-                                .withType(KafkaListenerType.INTERNAL)
-                                .withTls(false)
-                                .build())
-                        .withNewEphemeralStorage()
-                        .endEphemeralStorage()
-                    .endKafka()
-                    .withNewZookeeper()
-                        .withReplicas(3)
-                        .withNewEphemeralStorage()
-                        .endEphemeralStorage()
-                    .endZookeeper()
-                .endSpec()
-                .build();
+            .withNewMetadata()
+                .withName(CLUSTER_NAME)
+                .withNamespace(NAMESPACE)
+                .withLabels(Map.of("selector", "matching"))
+                .withAnnotations(Map.of(
+                        Annotations.ANNO_STRIMZI_IO_NODE_POOLS, "enabled",
+                        Annotations.ANNO_STRIMZI_IO_KRAFT, "enabled"
+                ))
+            .endMetadata()
+            .withNewSpec()
+                .withNewKafka()
+                    .withListeners(new GenericKafkaListenerBuilder()
+                            .withName("plain")
+                            .withPort(9092)
+                            .withType(KafkaListenerType.INTERNAL)
+                            .withTls(false)
+                            .build())
+                .endKafka()
+            .endSpec()
+            .build();
 
     private final static KafkaNodePool POOL = new KafkaNodePoolBuilder()
             .withNewMetadata()
@@ -79,7 +74,7 @@ public class KafkaAssemblyOperatorNodePoolWatcherTest {
                 .withNewJbodStorage()
                     .withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("100Gi").build())
                 .endJbodStorage()
-                .withRoles(ProcessRoles.BROKER)
+                .withRoles(ProcessRoles.CONTROLLER, ProcessRoles.BROKER)
                 .withResources(new ResourceRequirementsBuilder().withRequests(Map.of("cpu", new Quantity("4"))).build())
             .endSpec()
             .build();

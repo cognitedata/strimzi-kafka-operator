@@ -4,6 +4,9 @@
  */
 package io.strimzi.certs;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
@@ -36,9 +39,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 /**
  * An OpenSSL based certificate manager.
@@ -124,8 +124,10 @@ public class OpenSslCertManager implements CertManager {
      * Add basic constraints and subject alt names section to the provided openssl configuration file
      *
      * @param sbj subject information
+     *
      * @return openssl configuration file with subject alt names added
-     * @throws IOException
+     *
+     * @throws IOException  Throws IOException when IO operations fail
      */
     private Path buildConfigFile(Subject sbj, boolean isCa) throws IOException {
         Path sna = createDefaultConfig();

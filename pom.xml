@@ -5,7 +5,7 @@
     <groupId>io.strimzi</groupId>
     <artifactId>strimzi</artifactId>
     <packaging>pom</packaging>
-    <version>0.39.0-SNAPSHOT</version>
+    <version>0.46.0-SNAPSHOT</version>
 
     <licenses>
         <license>
@@ -85,15 +85,17 @@
             <organization>Red Hat</organization>
             <organizationUrl>https://www.redhat.com</organizationUrl>
         </developer>
+        <developer>
+            <name>Kate Stanley</name>
+            <email>kstanley@redhat.com</email>
+            <organization>Red Hat</organization>
+            <organizationUrl>https://www.redhat.com</organizationUrl>
+        </developer>
     </developers>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-
-        <!-- Configures if we should fail on warnings when generating Javadocs -->
-        <javadoc.fail.on.warnings>true</javadoc.fail.on.warnings>
+        <maven.compiler.release>17</maven.compiler.release>
 
         <!-- Points to the root directory of the Strimzi project directory and can be used for fixed location to configuration files -->
         <strimziRootDirectory>${basedir}</strimziRootDirectory>
@@ -104,52 +106,52 @@
         <maven.failsafe.version>3.1.2</maven.failsafe.version>
         <maven.assembly.version>3.4.2</maven.assembly.version>
         <maven.shade.version>3.4.1</maven.shade.version>
-        <maven.javadoc.version>3.4.1</maven.javadoc.version>
+        <maven.javadoc.version>3.10.0</maven.javadoc.version>
         <maven.source.version>3.0.1</maven.source.version>
         <maven.dependency.version>3.3.0</maven.dependency.version>
         <maven.gpg.version>1.6</maven.gpg.version>
-        <maven.checkstyle.version>3.3.0</maven.checkstyle.version>
+        <maven.checkstyle.version>3.5.0</maven.checkstyle.version>
         <maven.enforcer.version>3.0.0-M2</maven.enforcer.version>
         <maven.jar.version>3.1.0</maven.jar.version>
-        <sonatype.nexus.staging.version>1.6.13</sonatype.nexus.staging.version>
+        <sonatype.nexus.staging.version>1.7.0</sonatype.nexus.staging.version>
         <maven.spotbugs.version>4.7.3.4</maven.spotbugs.version>
-        <maven.jacoco.version>0.8.8</maven.jacoco.version>
+        <maven.jacoco.version>0.8.12</maven.jacoco.version>
         <maven.exec.version>3.1.0</maven.exec.version>
         <maven.resources.version>3.1.0</maven.resources.version>
 
         <!-- Build tools -->
-        <checkstyle.version>10.12.2</checkstyle.version>
+        <checkstyle.version>10.18.1</checkstyle.version>
         <spotbugs.version>4.7.3</spotbugs.version>
-        <sundrio.version>0.100.3</sundrio.version>
-        <lombok.version>1.18.24</lombok.version>
+        <sundrio.version>0.200.0</sundrio.version>
+        <lombok.version>1.18.32</lombok.version>
 
         <!-- Runtime dependencies -->
-        <fabric8.kubernetes-client.version>6.9.2</fabric8.kubernetes-client.version>
-        <fabric8.openshift-client.version>6.9.2</fabric8.openshift-client.version>
-        <fabric8.kubernetes-model.version>6.9.2</fabric8.kubernetes-model.version>
+        <fabric8.kubernetes-client.version>7.1.0</fabric8.kubernetes-client.version>
+        <fabric8.openshift-client.version>7.1.0</fabric8.openshift-client.version>
+        <fabric8.kubernetes-model.version>7.1.0</fabric8.kubernetes-model.version>
         <fabric8.zjsonpatch.version>0.3.0</fabric8.zjsonpatch.version>
-        <fasterxml.jackson-core.version>2.15.3</fasterxml.jackson-core.version>
-        <fasterxml.jackson-databind.version>2.15.3</fasterxml.jackson-databind.version>
-        <fasterxml.jackson-dataformat.version>2.15.3</fasterxml.jackson-dataformat.version>
-        <fasterxml.jackson-annotations.version>2.15.3</fasterxml.jackson-annotations.version>
-        <fasterxml.jackson-datatype.version>2.15.3</fasterxml.jackson-datatype.version>
-        <fasterxml.jackson-jaxrs.version>2.15.3</fasterxml.jackson-jaxrs.version>
-        <vertx.version>4.5.0</vertx.version>
-        <vertx-junit5.version>4.5.0</vertx-junit5.version>
-        <kafka.version>3.6.0</kafka.version>
+        <fasterxml.jackson-core.version>2.16.2</fasterxml.jackson-core.version>
+        <fasterxml.jackson-databind.version>2.16.2</fasterxml.jackson-databind.version>
+        <fasterxml.jackson-dataformat.version>2.16.2</fasterxml.jackson-dataformat.version>
+        <fasterxml.jackson-annotations.version>2.16.2</fasterxml.jackson-annotations.version>
+        <fasterxml.jackson-datatype.version>2.16.2</fasterxml.jackson-datatype.version>
+        <fasterxml.jackson-jaxrs.version>2.16.2</fasterxml.jackson-jaxrs.version>
+        <vertx.version>4.5.12</vertx.version>
+        <vertx-junit5.version>4.5.12</vertx-junit5.version>
+        <kafka.version>3.9.0</kafka.version>
         <yammer-metrics.version>2.2.0</yammer-metrics.version>
-        <zookeeper.version>3.8.3</zookeeper.version>
-        <zkclient.version>0.11</zkclient.version>
+        <snappy.version>1.1.10.5</snappy.version>
         <slf4j.version>1.7.36</slf4j.version>
         <log4j.version>2.17.2</log4j.version>
         <quartz.version>2.3.2</quartz.version>
-        <opentelemetry.alpha-version>1.19.0-alpha</opentelemetry.alpha-version>
-        <jetty.version>9.4.53.v20231009</jetty.version>
+        <opentelemetry.version>1.34.1</opentelemetry.version>
+        <opentelemetry-alpha.version>${opentelemetry.version}-alpha</opentelemetry-alpha.version>
+        <jetty.version>9.4.56.v20240826</jetty.version>
         <javax-servlet.version>3.1.0</javax-servlet.version>
-        <strimzi-oauth.version>0.14.0</strimzi-oauth.version>
-        <netty.version>4.1.100.Final</netty.version>
-        <micrometer.version>1.9.5</micrometer.version>
-        <jayway-jsonpath.version>2.8.0</jayway-jsonpath.version>
+        <strimzi-oauth.version>0.15.0</strimzi-oauth.version>
+        <netty.version>4.1.117.Final</netty.version>
+        <micrometer.version>1.12.13</micrometer.version>
+        <jayway-jsonpath.version>2.9.0</jayway-jsonpath.version>
         <registry.version>1.3.2.Final</registry.version>
         <commons-codec.version>1.13</commons-codec.version>
 
@@ -157,18 +159,18 @@
         <hamcrest.version>2.2</hamcrest.version>
         <mockito.version>4.11.0</mockito.version>
         <junit.platform.version>1.8.2</junit.platform.version>
-        <junit-platform-surefire-provider.version>1.3.2</junit-platform-surefire-provider.version>
         <opentest4j.version>1.2.0</opentest4j.version>
         <jupiter.version>5.8.2</jupiter.version>
-        <strimzi-test-container.version>0.105.0</strimzi-test-container.version>
+        <strimzi-test-container.version>0.109.1</strimzi-test-container.version>
         <mockserver.version>5.13.2</mockserver.version>
         <mockwebserver.version>3.14.7</mockwebserver.version>
         <valid4j.version>1.1</valid4j.version>
         <javax.json.version>1.1.4</javax.json.version>
-        <rest-assured.version>4.4.0</rest-assured.version>
-        <rest-assured-json-path.version>4.4.0</rest-assured-json-path.version>
-        <bouncycastle.version>1.76</bouncycastle.version>
-        <kroxylicious-testing.version>0.4.0</kroxylicious-testing.version>
+        <bouncycastle.version>1.78.1</bouncycastle.version>
+        <kindcontainer.version>1.4.7</kindcontainer.version>
+        <junit4.version>4.13.2</junit4.version>
+        <skodjob.test-frame.version>0.8.0</skodjob.test-frame.version>
+        <skodjob-doc.version>0.3.0</skodjob-doc.version>
 
         <!-- properties to skip surefire tests during failsafe execution -->
         <skipTests>false</skipTests>
@@ -182,15 +184,10 @@
             <id>ossrh</id>
             <url>https://oss.sonatype.org/content/repositories/snapshots</url>
         </snapshotRepository>
-        <repository>
-            <id>ossrh</id>
-            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
-        </repository>
     </distributionManagement>
 
     <modules>
         <module>kafka-agent</module>
-        <module>mirror-maker-agent</module>
         <module>tracing-agent</module>
         <module>test</module>
         <module>crd-annotations</module>
@@ -233,6 +230,11 @@
                         <artifactId>tools</artifactId>
                     </exclusion>
                 </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+                <version>${lombok.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.strimzi</groupId>
@@ -293,7 +295,7 @@
                 <exclusions>
                     <exclusion>
                         <groupId>io.fabric8</groupId>
-                        <artifactId>kubernetes-httpclient-okhttp</artifactId>
+                        <artifactId>kubernetes-httpclient-vertx</artifactId>
                     </exclusion>
                 </exclusions>
             </dependency>
@@ -420,6 +422,12 @@
             </dependency>
             <dependency>
                 <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-tools</artifactId>
+                <version>${kafka.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka_2.13</artifactId>
                 <version>${kafka.version}</version>
             </dependency>
@@ -452,43 +460,6 @@
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-streams</artifactId>
                 <version>${kafka.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.zookeeper</groupId>
-                <artifactId>zookeeper</artifactId>
-                <version>${zookeeper.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>io.netty</groupId>
-                        <artifactId>netty-handler</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>io.netty</groupId>
-                        <artifactId>netty-transport-native-epoll</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>ch.qos.logback</groupId>
-                        <artifactId>logback-classic</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>ch.qos.logback</groupId>
-                        <artifactId>logback-core</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.slf4j</groupId>
-                        <artifactId>slf4j-api</artifactId>
-                    </exclusion>
-                </exclusions>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.zookeeper</groupId>
-                <artifactId>zookeeper-jute</artifactId>
-                <version>${zookeeper.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.101tec</groupId>
-                <artifactId>zkclient</artifactId>
-                <version>${zkclient.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.slf4j</groupId>
@@ -676,6 +647,12 @@
                 <classifier>linux-x86_64</classifier>
             </dependency>
             <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-transport-native-epoll</artifactId>
+                <version>${netty.version}</version>
+                <classifier>linux-aarch_64</classifier>
+            </dependency>
+            <dependency>
                 <groupId>org.quartz-scheduler</groupId>
                 <artifactId>quartz</artifactId>
                 <version>${quartz.version}</version>
@@ -704,14 +681,29 @@
             <dependency>
                 <groupId>io.opentelemetry</groupId>
                 <artifactId>opentelemetry-sdk-extension-autoconfigure</artifactId>
-                <version>${opentelemetry.alpha-version}</version>
+                <version>${opentelemetry.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.jayway.jsonpath</groupId>
                 <artifactId>json-path</artifactId>
                 <version>${jayway-jsonpath.version}</version>
             </dependency>
-
+            <!-- The skodjob dependency is required at compile time, not solely in the test scope, due to the creation of custom metrics components. -->
+            <dependency>
+                <groupId>io.skodjob</groupId>
+                <artifactId>test-frame-metrics-collector</artifactId>
+                <version>${skodjob.test-frame.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.skodjob</groupId>
+                <artifactId>test-frame-log-collector</artifactId>
+                <version>${skodjob.test-frame.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.skodjob</groupId>
+                <artifactId>test-frame-common</artifactId>
+                <version>${skodjob.test-frame.version}</version>
+            </dependency>
             <!-- Test dependencies -->
             <dependency>
                 <groupId>io.strimzi</groupId>
@@ -739,31 +731,6 @@
                 <version>${project.version}</version>
                 <classifier>tests</classifier>
                 <type>test-jar</type>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.fabric8</groupId>
-                <artifactId>kubernetes-server-mock</artifactId>
-                <version>${fabric8.kubernetes-client.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>com.squareup.okhttp3</groupId>
-                <artifactId>mockwebserver</artifactId>
-                <version>${mockwebserver.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <!-- Pin version of transitive junit dependency of the above dependency to avoid CVE-2020-15250 -->
-                <groupId>junit</groupId>
-                <artifactId>junit</artifactId>
-                <version>4.13.2</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.fabric8</groupId>
-                <artifactId>openshift-server-mock</artifactId>
-                <version>${fabric8.kubernetes-client.version}</version>
                 <scope>test</scope>
             </dependency>
             <dependency>
@@ -801,18 +768,6 @@
                 <artifactId>hamcrest</artifactId>
                 <version>${hamcrest.version}</version>
                 <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.junit.jupiter</groupId>
-                <artifactId>junit-jupiter-engine</artifactId>
-                <version>${jupiter.version}</version>
-                <scope>test</scope>
-                <exclusions>
-                    <exclusion>
-                        <groupId>org.apiguardian</groupId>
-                        <artifactId>apiguardian-api</artifactId>
-                    </exclusion>
-                </exclusions>
             </dependency>
             <dependency>
                 <groupId>org.junit.jupiter</groupId>
@@ -863,21 +818,20 @@
                 <version>${javax-servlet.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.kroxylicious.testing</groupId>
-                <artifactId>testing-api</artifactId>
-                <version>${kroxylicious-testing.version}</version>
-                <scope>test</scope>
+                <groupId>com.dajudge.kindcontainer</groupId>
+                <artifactId>kindcontainer</artifactId>
+                <version>${kindcontainer.version}</version>
+            </dependency>
+            <!-- JUnit dependency is needed at compile time by MockKube because of how Test Containers are designed -->
+            <dependency>
+                <groupId>junit</groupId>
+                <artifactId>junit</artifactId>
+                <version>${junit4.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.kroxylicious.testing</groupId>
-                <artifactId>testing-junit5-extension</artifactId>
-                <version>${kroxylicious-testing.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.kroxylicious.testing</groupId>
-                <artifactId>testing-impl</artifactId>
-                <version>${kroxylicious-testing.version}</version>
+                <groupId>io.skodjob</groupId>
+                <artifactId>test-docs-generator-maven-plugin</artifactId>
+                <version>${skodjob-doc.version}</version>
                 <scope>test</scope>
             </dependency>
         </dependencies>
@@ -1007,19 +961,22 @@
                 <version>${maven.jacoco.version}</version>
                 <executions>
                     <execution>
+                        <id>default-prepare-agent</id>
                         <goals>
                             <goal>prepare-agent</goal>
                         </goals>
-                        <configuration>
-                            <propertyName>surefireArgLine</propertyName>
-                        </configuration>
                     </execution>
                     <execution>
-                        <id>report</id>
-                        <phase>package</phase>
+                        <id>default-report</id>
                         <goals>
                             <goal>report</goal>
                         </goals>
+                        <configuration>
+                            <excludes>
+                                <exclude>io/strimzi/api/**/*Fluent*.class</exclude>
+                                <exclude>io/strimzi/api/**/*Builder*.class</exclude>
+                            </excludes>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
@@ -1135,40 +1092,6 @@
                         </goals>
                         <configuration>
                             <failOnWarning>true</failOnWarning>
-                            <ignoredUnusedDeclaredDependencies>
-                                <ignoredUnusedDeclaredDependency>io.fabric8:kubernetes-client</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>io.fabric8:kubernetes-httpclient-jdk</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>io.fabric8:openshift-client</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka-clients</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka-streams</ignoredUnusedDeclaredDependency>
-                                <!-- Used in Kafka Agent through reflection -->
-                                <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka-server-common</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-core</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-slf4j-impl</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>io.sundr:builder-annotations</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>io.sundr:sundr-codegen</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.projectlombok:lombok</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.slf4j:slf4j-api:jar</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.glassfish:javax.json:jar</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka_2.13:jar</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>io.netty:netty-transport-native-epoll:jar</ignoredUnusedDeclaredDependency>
-                                <ignoredDependency>org.junit.platform</ignoredDependency>
-                                <ignoredUnusedDeclaredDependency>org.apache.kafka:connect-file</ignoredUnusedDeclaredDependency>
-                                <ignoredDependency>org.junit.jupiter</ignoredDependency>
-                                <ignoredDependency>org.junit.platform</ignoredDependency>
-                                <ignoredUnusedDeclaredDependency>io.micrometer:micrometer-registry-prometheus</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.mockito:mockito-inline</ignoredUnusedDeclaredDependency>
-                            </ignoredUnusedDeclaredDependencies>
-                            <ignoredUsedUndeclaredDependencies>
-                                <ignoredUsedUndeclaredDependency>org.apache.kafka:kafka-raft:jar</ignoredUsedUndeclaredDependency>
-                            </ignoredUsedUndeclaredDependencies>
-                            <ignoredNonTestScopedDependencies>
-                                <ignoredNonTestScopedDependency>com.fasterxml.jackson.core:jackson-core</ignoredNonTestScopedDependency>
-                                <ignoredNonTestScopedDependency>org.apache.zookeeper:zookeeper-jute</ignoredNonTestScopedDependency>
-                                <ignoredNonTestScopedDependency>io.fabric8:kubernetes-model-coordination</ignoredNonTestScopedDependency>
-                                <ignoredNonTestScopedDependency>io.fabric8:kubernetes-model-common</ignoredNonTestScopedDependency>
-                                <ignoredNonTestScopedDependency>org.apache.logging.log4j:log4j-core</ignoredNonTestScopedDependency>
-                            </ignoredNonTestScopedDependencies>
                         </configuration>
                     </execution>
                 </executions>
@@ -1200,7 +1123,7 @@
                             <sourcepath>${project.build.sourceDirectory}:${project.build.directory}/generated-sources/annotations</sourcepath>
                             <show>public</show>
                             <failOnError>true</failOnError>
-                            <failOnWarnings>${javadoc.fail.on.warnings}</failOnWarnings>
+                            <failOnWarnings>false</failOnWarnings>
                         </configuration>
                     </execution>
                 </executions>

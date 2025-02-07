@@ -12,26 +12,28 @@ import io.strimzi.operator.cluster.model.NoImageException;
 import io.strimzi.operator.cluster.model.UnsupportedVersionException;
 import io.strimzi.operator.common.InvalidConfigurationException;
 import io.strimzi.operator.common.Util;
+import io.strimzi.operator.common.config.ConfigParameter;
+import io.strimzi.operator.common.config.ConfigParameterParser;
+import io.strimzi.operator.common.featuregates.FeatureGates;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.resource.ConfigParameter;
-import io.strimzi.operator.common.operator.resource.ConfigParameterParser;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.HashMap;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import static io.strimzi.operator.common.operator.resource.ConfigParameterParser.LONG;
-import static io.strimzi.operator.common.operator.resource.ConfigParameterParser.INTEGER;
-import static io.strimzi.operator.common.operator.resource.ConfigParameterParser.LOCAL_OBJECT_REFERENCE_LIST;
-import static io.strimzi.operator.common.operator.resource.ConfigParameterParser.NAMESPACE_SET;
-import static io.strimzi.operator.common.operator.resource.ConfigParameterParser.STRING;
-import static io.strimzi.operator.common.operator.resource.ConfigParameterParser.LABEL_PREDICATE;
-import static io.strimzi.operator.common.operator.resource.ConfigParameterParser.BOOLEAN;
+import static io.strimzi.operator.common.config.ConfigParameterParser.BOOLEAN;
+import static io.strimzi.operator.common.config.ConfigParameterParser.INTEGER;
+import static io.strimzi.operator.common.config.ConfigParameterParser.LABEL_PREDICATE;
+import static io.strimzi.operator.common.config.ConfigParameterParser.LOCAL_OBJECT_REFERENCE_LIST;
+import static io.strimzi.operator.common.config.ConfigParameterParser.LONG;
+import static io.strimzi.operator.common.config.ConfigParameterParser.NAMESPACE_SET;
+import static io.strimzi.operator.common.config.ConfigParameterParser.STRING;
+import static io.strimzi.operator.common.config.ConfigParameterParser.parseFeatureGates;
 
 /**
  * Cluster Operator configuration
@@ -54,21 +56,17 @@ public class ClusterOperatorConfig {
     public static final String STRIMZI_KAFKA_CONNECT_IMAGES = "STRIMZI_KAFKA_CONNECT_IMAGES";
 
     /**
-     * Configures the Kafka Mirror Maker container images
-     */
-    public static final String STRIMZI_KAFKA_MIRROR_MAKER_IMAGES = "STRIMZI_KAFKA_MIRROR_MAKER_IMAGES";
-
-    /**
      * Configures the Kafka Mirror Maker 2 container images
      */
     public static final String STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES = "STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES";
 
     /**
-     * Configures the Entity Operator TLS sidecar container images
+     * Configures the Entity Operator TLS sidecar container images.
+     * Used only to produce warning if defined at startup.
      */
-    public static final String STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE = "STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE";
-    private static final String STRIMZI_DEFAULT_TLS_SIDECAR_KAFKA_IMAGE = "STRIMZI_DEFAULT_TLS_SIDECAR_KAFKA_IMAGE"; // Used only to produce warning if defined at startup
-    private static final String STRIMZI_DEFAULT_TLS_SIDECAR_CRUISE_CONTROL_IMAGE = "STRIMZI_DEFAULT_TLS_SIDECAR_CRUISE_CONTROL_IMAGE"; // Used only to produce warning if defined at startup
+    private static final String STRIMZI_DEFAULT_TLS_SIDECAR_KAFKA_IMAGE = "STRIMZI_DEFAULT_TLS_SIDECAR_KAFKA_IMAGE";
+    private static final String STRIMZI_DEFAULT_TLS_SIDECAR_CRUISE_CONTROL_IMAGE = "STRIMZI_DEFAULT_TLS_SIDECAR_CRUISE_CONTROL_IMAGE";
+    private static final String STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE = "STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE";
 
     /**
      * Configures the Kafka Exporter container image
@@ -135,7 +133,7 @@ public class ClusterOperatorConfig {
     /**
      * Namespace in which the operator will run and create resources
      */
-    public static final ConfigParameter<Set<String>> NAMESPACE = new ConfigParameter<>("STRIMZI_NAMESPACE", NAMESPACE_SET, "*",  CONFIG_VALUES);
+    public static final ConfigParameter<Set<String>> NAMESPACE = new ConfigParameter<>("STRIMZI_NAMESPACE", NAMESPACE_SET, ConfigParameter.ANY_NAMESPACE,  CONFIG_VALUES);
 
     /**
      * Specify every how many milliseconds the reconciliation runs
@@ -151,11 +149,6 @@ public class ClusterOperatorConfig {
      * Timeout used to wait for a Kafka Connect builds to finish
      */
     public static final ConfigParameter<Long> CONNECT_BUILD_TIMEOUT_MS = new ConfigParameter<>("STRIMZI_CONNECT_BUILD_TIMEOUT_MS", LONG, "300000", CONFIG_VALUES);
-
-    /**
-     * Set true to create the ClusterRoles
-     */
-    public static final ConfigParameter<Boolean> CREATE_CLUSTER_ROLES = new ConfigParameter<>("STRIMZI_CREATE_CLUSTER_ROLES", BOOLEAN, "false", CONFIG_VALUES);
 
     /**
      * Set true to generate Network Policies
@@ -196,11 +189,6 @@ public class ClusterOperatorConfig {
      * The size of the thread pool used for various operations
      */
     public static final ConfigParameter<Integer> OPERATIONS_THREAD_POOL_SIZE = new ConfigParameter<>("STRIMZI_OPERATIONS_THREAD_POOL_SIZE", INTEGER, "10", CONFIG_VALUES);
-
-    /**
-     * Session timeout for the Zookeeper Admin client used in ZK scaling operations
-     */
-    public static final ConfigParameter<Integer> ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS = new ConfigParameter<>("STRIMZI_ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS", INTEGER, "10000", CONFIG_VALUES);
 
     /**
      * Number of seconds to cache a successful DNS name lookup
@@ -252,6 +240,11 @@ public class ClusterOperatorConfig {
     /* test */ static final ConfigParameter<String> POD_SECURITY_PROVIDER_RESTRICTED_CLASS = new ConfigParameter<>("POD_SECURITY_PROVIDER_RESTRICTED_CLASS", STRING, "io.strimzi.plugin.security.profiles.impl.RestrictedPodSecurityProvider", CONFIG_VALUES);
 
     /**
+     * Set true to generate Pod Disruption Budgets
+     */
+    public static final ConfigParameter<Boolean> POD_DISRUPTION_BUDGET_GENERATION = new ConfigParameter<>("STRIMZI_POD_DISRUPTION_BUDGET_GENERATION", BOOLEAN, "true", CONFIG_VALUES);
+
+    /**
      * The configured Kafka versions
      */
     private final KafkaVersion.Lookup versions;
@@ -270,6 +263,10 @@ public class ClusterOperatorConfig {
             LOGGER.warn("Cruise Control TLS sidecar container has been removed and the environment variable {} is not used anymore. " +
                     "You can remove it from the Strimzi Cluster Operator deployment.", STRIMZI_DEFAULT_TLS_SIDECAR_CRUISE_CONTROL_IMAGE);
         }
+        if (map.containsKey(STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE))    {
+            LOGGER.warn("Entity Operator TLS sidecar container has been removed and the environment variable {} is not used anymore. " +
+                "You can remove it from the Strimzi Cluster Operator deployment.", STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE);
+        }
     }
 
     /**
@@ -281,7 +278,7 @@ public class ClusterOperatorConfig {
 
     public static ClusterOperatorConfig buildFromMap(Map<String, String> map) {
         warningsForRemovedEndVars(map);
-        KafkaVersion.Lookup lookup = parseKafkaVersions(map.get(STRIMZI_KAFKA_IMAGES), map.get(STRIMZI_KAFKA_CONNECT_IMAGES), map.get(STRIMZI_KAFKA_MIRROR_MAKER_IMAGES), map.get(STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES));
+        KafkaVersion.Lookup lookup = parseKafkaVersions(map.get(STRIMZI_KAFKA_IMAGES), map.get(STRIMZI_KAFKA_CONNECT_IMAGES), map.get(STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES));
         return buildFromMap(map, lookup);
 
     }
@@ -335,11 +332,10 @@ public class ClusterOperatorConfig {
         return (T) this.map.get(value.key());
     }
 
-    private static KafkaVersion.Lookup parseKafkaVersions(String kafkaImages, String connectImages, String mirrorMakerImages, String mirrorMaker2Images) {
+    private static KafkaVersion.Lookup parseKafkaVersions(String kafkaImages, String connectImages, String mirrorMaker2Images) {
         KafkaVersion.Lookup lookup = new KafkaVersion.Lookup(
                 Util.parseMap(kafkaImages),
                 Util.parseMap(connectImages),
-                Util.parseMap(mirrorMakerImages),
                 Util.parseMap(mirrorMaker2Images));
 
         String image = "";
@@ -353,10 +349,6 @@ public class ClusterOperatorConfig {
             image = "Kafka Connect";
             envVar = STRIMZI_KAFKA_CONNECT_IMAGES;
             lookup.validateKafkaConnectImages(lookup.supportedVersions());
-
-            image = "Kafka Mirror Maker";
-            envVar = STRIMZI_KAFKA_MIRROR_MAKER_IMAGES;
-            lookup.validateKafkaMirrorMakerImages(lookup.supportedVersions());
 
             image = "Kafka Mirror Maker 2";
             envVar = STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES;
@@ -384,10 +376,6 @@ public class ClusterOperatorConfig {
         } else {
             return value;
         }
-    }
-
-    static ConfigParameterParser<FeatureGates> parseFeatureGates() {
-        return FeatureGates::new;
     }
 
     static ConfigParameterParser<ImagePullPolicy> parseImagePullPolicy() {
@@ -478,24 +466,10 @@ public class ClusterOperatorConfig {
     }
 
     /**
-     * @return  how many milliseconds should we wait for Zookeeper Admin Sessions to timeout
-     */
-    public int getZkAdminSessionTimeoutMs() {
-        return get(ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS);
-    }
-
-    /**
      * @return  How many milliseconds should we wait for Kafka Connect build to complete
      */
     public long getConnectBuildTimeoutMs() {
         return get(CONNECT_BUILD_TIMEOUT_MS);
-    }
-
-    /**
-     * @return  Indicates whether Cluster Roles should be created
-     */
-    public boolean isCreateClusterRoles() {
-        return get(CREATE_CLUSTER_ROLES);
     }
 
     /**
@@ -607,6 +581,13 @@ public class ClusterOperatorConfig {
         }
     }
 
+    /**
+     * @return  Indicates whether Pod Disruption Budgets should be generated
+     */
+    public boolean isPodDisruptionBudgetGeneration() {
+        return get(POD_DISRUPTION_BUDGET_GENERATION);
+    }
+
     @Override
     public String toString() {
         return "ClusterOperatorConfig{" +
@@ -614,7 +595,6 @@ public class ClusterOperatorConfig {
                 "\n\treconciliationIntervalMs=" + getReconciliationIntervalMs() +
                 "\n\toperationTimeoutMs=" + getOperationTimeoutMs() +
                 "\n\tconnectBuildTimeoutMs=" + getConnectBuildTimeoutMs() +
-                "\n\tcreateClusterRoles=" + isCreateClusterRoles() +
                 "\n\tnetworkPolicyGeneration=" + isNetworkPolicyGeneration() +
                 "\n\tversions='" + versions() + '\'' +
                 "\n\timagePullPolicy='" + getImagePullPolicy() + '\'' +
@@ -623,13 +603,13 @@ public class ClusterOperatorConfig {
                 "\n\toperatorNamespaceLabels='" + getOperatorNamespaceLabels() + '\'' +
                 "\n\tcustomResourceSelector='" + getCustomResourceSelector() + '\'' +
                 "\n\tfeatureGates='" + featureGates() + '\'' +
-                "\n\tzkAdminSessionTimeoutMs=" + getZkAdminSessionTimeoutMs() +
                 "\n\tdnsCacheTtlSec=" + getDnsCacheTtlSec() +
                 "\n\tpodSetReconciliationOnly=" + isPodSetReconciliationOnly() +
                 "\n\tpodSetControllerWorkQueueSize=" + getPodSetControllerWorkQueueSize() +
                 "\n\toperatorName='" + getOperatorName() + '\'' +
                 "\n\tpodSecurityProviderClass='" + getPodSecurityProviderClass() + '\'' +
                 "\n\tleaderElectionConfig='" + getLeaderElectionConfig() + '\'' +
+                "\n\tpodDisruptionBudgetGeneration=" + isPodDisruptionBudgetGeneration() +
                 "}";
     }
 }

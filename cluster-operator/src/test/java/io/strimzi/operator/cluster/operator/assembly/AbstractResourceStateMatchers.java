@@ -4,9 +4,9 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
-import io.strimzi.api.kafka.model.KafkaRebalance;
-import io.strimzi.api.kafka.model.balancing.KafkaRebalanceState;
-import io.strimzi.api.kafka.model.status.Condition;
+import io.strimzi.api.kafka.model.common.Condition;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalance;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceState;
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
 import org.hamcrest.TypeSafeDiagnosingMatcher;
@@ -55,7 +55,7 @@ public class AbstractResourceStateMatchers {
      * Checks all conditions in the supplied resource to see if the type of one of them matches the supplied rebalance state.
      *
      * @param state he expected rebalance state to be searched for.
-     * @return
+     * @return Matcher for the List of Conditions
      */
     public static Matcher<List<Condition>> hasStateInConditions(KafkaRebalanceState state) {
         return new TypeSafeDiagnosingMatcher<>() {

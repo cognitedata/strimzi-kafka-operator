@@ -5,7 +5,7 @@
 
 package io.strimzi.operator.cluster.model;
 
-import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationCustom;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerAuthenticationCustom;
 import io.strimzi.operator.common.Reconciliation;
 
 import java.util.List;
@@ -17,7 +17,7 @@ import java.util.Map;
 public class KafkaListenerCustomAuthConfiguration extends AbstractConfiguration {
     private static final List<String> FORBIDDEN_PREFIXES;
     static {
-        FORBIDDEN_PREFIXES = AbstractConfiguration.splitPrefixesToList(KafkaListenerAuthenticationCustom.FORBIDDEN_PREFIXES);
+        FORBIDDEN_PREFIXES = AbstractConfiguration.splitPrefixesOrOptionsToList(KafkaListenerAuthenticationCustom.FORBIDDEN_PREFIXES);
     }
 
     /**
@@ -27,6 +27,6 @@ public class KafkaListenerCustomAuthConfiguration extends AbstractConfiguration 
      * @param jsonOptions       Configuration options
      */
     public KafkaListenerCustomAuthConfiguration(Reconciliation reconciliation, Iterable<Map.Entry<String, Object>> jsonOptions) {
-        super(reconciliation, jsonOptions, FORBIDDEN_PREFIXES);
+        super(reconciliation, jsonOptions, FORBIDDEN_PREFIXES, List.of(), List.of(), Map.of());
     }
 }

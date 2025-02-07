@@ -23,32 +23,32 @@ import io.fabric8.kubernetes.api.model.rbac.RoleRef;
 import io.fabric8.kubernetes.api.model.rbac.RoleRefBuilder;
 import io.fabric8.kubernetes.api.model.rbac.Subject;
 import io.fabric8.kubernetes.api.model.rbac.SubjectBuilder;
-import io.strimzi.api.kafka.model.CertSecretSource;
-import io.strimzi.api.kafka.model.ClientTls;
-import io.strimzi.api.kafka.model.JvmOptions;
-import io.strimzi.api.kafka.model.KafkaBridge;
-import io.strimzi.api.kafka.model.KafkaBridgeAdminClientSpec;
-import io.strimzi.api.kafka.model.KafkaBridgeConsumerSpec;
-import io.strimzi.api.kafka.model.KafkaBridgeHttpConfig;
-import io.strimzi.api.kafka.model.KafkaBridgeProducerSpec;
-import io.strimzi.api.kafka.model.KafkaBridgeResources;
-import io.strimzi.api.kafka.model.KafkaBridgeSpec;
-import io.strimzi.api.kafka.model.Rack;
-import io.strimzi.api.kafka.model.authentication.KafkaClientAuthentication;
-import io.strimzi.api.kafka.model.template.ContainerTemplate;
-import io.strimzi.api.kafka.model.template.DeploymentStrategy;
-import io.strimzi.api.kafka.model.template.DeploymentTemplate;
-import io.strimzi.api.kafka.model.template.InternalServiceTemplate;
-import io.strimzi.api.kafka.model.template.KafkaBridgeTemplate;
-import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplate;
-import io.strimzi.api.kafka.model.template.PodTemplate;
-import io.strimzi.api.kafka.model.template.ResourceTemplate;
-import io.strimzi.api.kafka.model.tracing.Tracing;
+import io.strimzi.api.kafka.model.bridge.KafkaBridge;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeAdminClientSpec;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeConsumerSpec;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeHttpConfig;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeProducerSpec;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeResources;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeSpec;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeTemplate;
+import io.strimzi.api.kafka.model.common.ClientTls;
+import io.strimzi.api.kafka.model.common.JvmOptions;
+import io.strimzi.api.kafka.model.common.Rack;
+import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthentication;
+import io.strimzi.api.kafka.model.common.template.ContainerTemplate;
+import io.strimzi.api.kafka.model.common.template.DeploymentStrategy;
+import io.strimzi.api.kafka.model.common.template.DeploymentTemplate;
+import io.strimzi.api.kafka.model.common.template.InternalServiceTemplate;
+import io.strimzi.api.kafka.model.common.template.PodDisruptionBudgetTemplate;
+import io.strimzi.api.kafka.model.common.template.PodTemplate;
+import io.strimzi.api.kafka.model.common.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.common.tracing.Tracing;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.model.logging.LoggingModel;
 import io.strimzi.operator.cluster.model.logging.SupportsLogging;
 import io.strimzi.operator.cluster.model.securityprofiles.ContainerSecurityProviderContextImpl;
 import io.strimzi.operator.cluster.model.securityprofiles.PodSecurityProviderContextImpl;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.InvalidResourceException;
@@ -77,8 +77,8 @@ public class KafkaBridgeCluster extends AbstractModel implements SupportsLogging
     protected static final String TLS_CERTS_BASE_VOLUME_MOUNT = "/opt/strimzi/bridge-certs/";
     protected static final String PASSWORD_VOLUME_MOUNT = "/opt/strimzi/bridge-password/";
     protected static final String ENV_VAR_KAFKA_INIT_INIT_FOLDER_KEY = "INIT_FOLDER";
-    private static final String LOG_AND_METRICS_CONFIG_VOLUME_NAME = "kafka-metrics-and-logging";
-    private static final String LOG_AND_METRICS_CONFIG_VOLUME_MOUNT = "/opt/strimzi/custom-config/";
+    private static final String KAFKA_BRIDGE_CONFIG_VOLUME_NAME = "kafka-bridge-configurations";
+    private static final String KAFKA_BRIDGE_CONFIG_VOLUME_MOUNT = "/opt/strimzi/custom-config/";
 
     // Cluster Operator environment variables for custom discovery labels and annotations
     protected static final String CO_ENV_VAR_CUSTOM_SERVICE_LABELS = "STRIMZI_CUSTOM_KAFKA_BRIDGE_SERVICE_LABELS";
@@ -87,35 +87,22 @@ public class KafkaBridgeCluster extends AbstractModel implements SupportsLogging
     // Kafka Bridge configuration keys (EnvVariables)
     protected static final String ENV_VAR_PREFIX = "KAFKA_BRIDGE_";
     protected static final String ENV_VAR_KAFKA_BRIDGE_METRICS_ENABLED = "KAFKA_BRIDGE_METRICS_ENABLED";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_BOOTSTRAP_SERVERS = "KAFKA_BRIDGE_BOOTSTRAP_SERVERS";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_TLS = "KAFKA_BRIDGE_TLS";
     protected static final String ENV_VAR_KAFKA_BRIDGE_TRUSTED_CERTS = "KAFKA_BRIDGE_TRUSTED_CERTS";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_TLS_AUTH_CERT = "KAFKA_BRIDGE_TLS_AUTH_CERT";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_TLS_AUTH_KEY = "KAFKA_BRIDGE_TLS_AUTH_KEY";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_SASL_PASSWORD_FILE = "KAFKA_BRIDGE_SASL_PASSWORD_FILE";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_SASL_USERNAME = "KAFKA_BRIDGE_SASL_USERNAME";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_SASL_MECHANISM = "KAFKA_BRIDGE_SASL_MECHANISM";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_OAUTH_CONFIG = "KAFKA_BRIDGE_OAUTH_CONFIG";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_OAUTH_CLIENT_SECRET = "KAFKA_BRIDGE_OAUTH_CLIENT_SECRET";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_OAUTH_ACCESS_TOKEN = "KAFKA_BRIDGE_OAUTH_ACCESS_TOKEN";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_OAUTH_REFRESH_TOKEN = "KAFKA_BRIDGE_OAUTH_REFRESH_TOKEN";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_OAUTH_PASSWORD_GRANT_PASSWORD = "KAFKA_BRIDGE_OAUTH_PASSWORD_GRANT_PASSWORD";
     protected static final String OAUTH_TLS_CERTS_BASE_VOLUME_MOUNT = "/opt/strimzi/oauth-certs/";
-    protected static final String ENV_VAR_STRIMZI_TRACING = "STRIMZI_TRACING";
-
-    protected static final String ENV_VAR_KAFKA_BRIDGE_ADMIN_CLIENT_CONFIG = "KAFKA_BRIDGE_ADMIN_CLIENT_CONFIG";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_PRODUCER_CONFIG = "KAFKA_BRIDGE_PRODUCER_CONFIG";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_CONSUMER_CONFIG = "KAFKA_BRIDGE_CONSUMER_CONFIG";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_ID = "KAFKA_BRIDGE_ID";
-
-    protected static final String ENV_VAR_KAFKA_BRIDGE_HTTP_HOST = "KAFKA_BRIDGE_HTTP_HOST";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_HTTP_PORT = "KAFKA_BRIDGE_HTTP_PORT";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_CORS_ENABLED = "KAFKA_BRIDGE_CORS_ENABLED";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_CORS_ALLOWED_ORIGINS = "KAFKA_BRIDGE_CORS_ALLOWED_ORIGINS";
-    protected static final String ENV_VAR_KAFKA_BRIDGE_CORS_ALLOWED_METHODS = "KAFKA_BRIDGE_CORS_ALLOWED_METHODS";
 
     protected static final String CO_ENV_VAR_CUSTOM_BRIDGE_POD_LABELS = "STRIMZI_CUSTOM_KAFKA_BRIDGE_LABELS";
     protected static final String INIT_VOLUME_MOUNT = "/opt/strimzi/init";
+
+    /**
+     * Key under which the bridge configuration is stored in ConfigMap
+     */
+    public static final String BRIDGE_CONFIGURATION_FILENAME = "application.properties";
+
+    /**
+     * Annotation for rolling the bridge whenever the configuration within the application.properties file is changed.
+     * When the configuration hash annotation change is detected, we force a pod restart.
+     */
+    public static final String ANNO_STRIMZI_IO_CONFIGURATION_HASH = Annotations.STRIMZI_DOMAIN + "configuration-hash";
 
     private int replicas;
     private ClientTls tls;
@@ -159,7 +146,7 @@ public class KafkaBridgeCluster extends AbstractModel implements SupportsLogging
      * @param sharedEnvironmentProvider Shared environment provider
      */
     private KafkaBridgeCluster(Reconciliation reconciliation, HasMetadata resource, SharedEnvironmentProvider sharedEnvironmentProvider) {
-        super(reconciliation, resource, KafkaBridgeResources.deploymentName(resource.getMetadata().getName()), COMPONENT_TYPE, sharedEnvironmentProvider);
+        super(reconciliation, resource, KafkaBridgeResources.componentName(resource.getMetadata().getName()), COMPONENT_TYPE, sharedEnvironmentProvider);
     }
 
     /**
@@ -294,15 +281,20 @@ public class KafkaBridgeCluster extends AbstractModel implements SupportsLogging
     protected List<Volume> getVolumes(boolean isOpenShift) {
         List<Volume> volumeList = new ArrayList<>(2);
         volumeList.add(VolumeUtils.createTempDirVolume(templatePod));
-        volumeList.add(VolumeUtils.createConfigMapVolume(LOG_AND_METRICS_CONFIG_VOLUME_NAME, KafkaBridgeResources.metricsAndLogConfigMapName(cluster)));
+        volumeList.add(VolumeUtils.createConfigMapVolume(KAFKA_BRIDGE_CONFIG_VOLUME_NAME, KafkaBridgeResources.configMapName(cluster)));
 
         if (tls != null) {
-            VolumeUtils.createSecretVolume(volumeList, tls.getTrustedCertificates(), isOpenShift);
+            CertUtils.createTrustedCertificatesVolumes(volumeList, tls.getTrustedCertificates(), isOpenShift);
         }
+
         if (rack != null) {
             volumeList.add(VolumeUtils.createEmptyDirVolume(INIT_VOLUME_NAME, "1Mi", "Memory"));
         }
+
         AuthenticationUtils.configureClientAuthenticationVolumes(authentication, volumeList, "oauth-certs", isOpenShift);
+
+        TemplateUtils.addAdditionalVolumes(templatePod, volumeList);
+
         return volumeList;
     }
 
@@ -310,14 +302,29 @@ public class KafkaBridgeCluster extends AbstractModel implements SupportsLogging
         List<VolumeMount> volumeMountList = new ArrayList<>(2);
 
         volumeMountList.add(VolumeUtils.createTempDirVolumeMount());
-        volumeMountList.add(VolumeUtils.createVolumeMount(LOG_AND_METRICS_CONFIG_VOLUME_NAME, LOG_AND_METRICS_CONFIG_VOLUME_MOUNT));
+        volumeMountList.add(VolumeUtils.createVolumeMount(KAFKA_BRIDGE_CONFIG_VOLUME_NAME, KAFKA_BRIDGE_CONFIG_VOLUME_MOUNT));
+
         if (tls != null) {
-            VolumeUtils.createSecretVolumeMount(volumeMountList, tls.getTrustedCertificates(), TLS_CERTS_BASE_VOLUME_MOUNT);
+            CertUtils.createTrustedCertificatesVolumeMounts(volumeMountList, tls.getTrustedCertificates(), TLS_CERTS_BASE_VOLUME_MOUNT);
         }
+
         if (rack != null) {
             volumeMountList.add(VolumeUtils.createVolumeMount(INIT_VOLUME_NAME, INIT_VOLUME_MOUNT));
         }
+
         AuthenticationUtils.configureClientAuthenticationVolumeMounts(authentication, volumeMountList, TLS_CERTS_BASE_VOLUME_MOUNT, PASSWORD_VOLUME_MOUNT, OAUTH_TLS_CERTS_BASE_VOLUME_MOUNT, "oauth-certs");
+
+        TemplateUtils.addAdditionalVolumeMounts(volumeMountList, templateContainer);
+
+        return volumeMountList;
+    }
+    
+    private List<VolumeMount> getInitContainerVolumeMounts() {
+        List<VolumeMount> volumeMountList = new ArrayList<>();
+        volumeMountList.add(VolumeUtils.createVolumeMount(INIT_VOLUME_NAME, INIT_VOLUME_MOUNT));
+
+        TemplateUtils.addAdditionalVolumeMounts(volumeMountList, templateInitContainer);
+
         return volumeMountList;
     }
 
@@ -367,7 +374,7 @@ public class KafkaBridgeCluster extends AbstractModel implements SupportsLogging
                     resources,
                     getInitContainerEnvVars(),
                     null,
-                    List.of(VolumeUtils.createVolumeMount(INIT_VOLUME_NAME, INIT_VOLUME_MOUNT)),
+                    getInitContainerVolumeMounts(),
                     null,
                     null,
                     imagePullPolicy
@@ -399,53 +406,11 @@ public class KafkaBridgeCluster extends AbstractModel implements SupportsLogging
         varList.add(ContainerUtils.createEnvVar(ENV_VAR_STRIMZI_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
         JvmOptionUtils.javaOptions(varList, jvmOptions);
 
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_BOOTSTRAP_SERVERS, bootstrapServers));
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_ADMIN_CLIENT_CONFIG, kafkaBridgeAdminClient == null ? "" : new KafkaBridgeAdminClientConfiguration(reconciliation, kafkaBridgeAdminClient.getConfig().entrySet()).getConfiguration()));
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_CONSUMER_CONFIG, kafkaBridgeConsumer == null ? "" : new KafkaBridgeConsumerConfiguration(reconciliation, kafkaBridgeConsumer.getConfig().entrySet()).getConfiguration()));
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_PRODUCER_CONFIG, kafkaBridgeProducer == null ? "" : new KafkaBridgeProducerConfiguration(reconciliation, kafkaBridgeProducer.getConfig().entrySet()).getConfiguration()));
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_ID, cluster));
-
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_HTTP_HOST, KafkaBridgeHttpConfig.HTTP_DEFAULT_HOST));
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_HTTP_PORT, String.valueOf(http != null ? http.getPort() : KafkaBridgeHttpConfig.HTTP_DEFAULT_PORT)));
-
-        if (http != null && http.getCors() != null) {
-            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_CORS_ENABLED, "true"));
-
-            if (http.getCors().getAllowedOrigins() != null) {
-                varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_CORS_ALLOWED_ORIGINS, String.join(",", http.getCors().getAllowedOrigins())));
-            }
-
-            if (http.getCors().getAllowedMethods() != null) {
-                varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_CORS_ALLOWED_METHODS, String.join(",", http.getCors().getAllowedMethods())));
-            }
-        } else {
-            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_CORS_ENABLED, "false"));
-        }
-
-        if (tls != null) {
-            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_TLS, "true"));
-
-            List<CertSecretSource> trustedCertificates = tls.getTrustedCertificates();
-
-            if (trustedCertificates != null && trustedCertificates.size() > 0) {
-                StringBuilder sb = new StringBuilder();
-                boolean separator = false;
-                for (CertSecretSource certSecretSource : trustedCertificates) {
-                    if (separator) {
-                        sb.append(";");
-                    }
-                    sb.append(certSecretSource.getSecretName() + "/" + certSecretSource.getCertificate());
-                    separator = true;
-                }
-                varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_TRUSTED_CERTS, sb.toString()));
-            }
+        if (tls != null && tls.getTrustedCertificates() != null && !tls.getTrustedCertificates().isEmpty()) {
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_BRIDGE_TRUSTED_CERTS, CertUtils.trustedCertsEnvVar(tls.getTrustedCertificates())));
         }
 
         AuthenticationUtils.configureClientAuthenticationEnvVars(authentication, varList, name -> ENV_VAR_PREFIX + name);
-
-        if (tracing != null) {
-            varList.add(ContainerUtils.createEnvVar(ENV_VAR_STRIMZI_TRACING, tracing.getType()));
-        }
 
         // Add shared environment variables used for all containers
         varList.addAll(sharedEnvironmentProvider.variables());
@@ -583,21 +548,38 @@ public class KafkaBridgeCluster extends AbstractModel implements SupportsLogging
     }
 
     /**
-     * Generates a metrics and logging ConfigMap according to the configuration. If this operand doesn't support logging
-     * or metrics, they will nto be set.
+     * Generates a ConfigMap containing the bridge configuration related to HTTP and Kafka clients.
+     * It also generates the metrics and logging configuration. If this operand doesn't support logging
+     * or metrics, they will not be set.
      *
      * @param metricsAndLogging     The external CMs with logging and metrics configuration
      *
      * @return The generated ConfigMap
      */
-    public ConfigMap generateMetricsAndLogConfigMap(MetricsAndLogging metricsAndLogging) {
+    public ConfigMap generateBridgeConfigMap(MetricsAndLogging metricsAndLogging) {
+        // generate the ConfigMap data entries for the metrics and logging configuration
+        Map<String, String> data = ConfigMapUtils.generateMetricsAndLogConfigMapData(reconciliation, this, metricsAndLogging);
+        // add the ConfigMap data entry for the bridge HTTP and Kafka clients related configuration
+        data.put(
+                BRIDGE_CONFIGURATION_FILENAME,
+                new KafkaBridgeConfigurationBuilder(reconciliation, cluster, bootstrapServers)
+                        .withTracing(tracing)
+                        .withTls(tls)
+                        .withAuthentication(authentication)
+                        .withKafkaAdminClient(kafkaBridgeAdminClient)
+                        .withKafkaProducer(kafkaBridgeProducer)
+                        .withKafkaConsumer(kafkaBridgeConsumer)
+                        .withHttp(http, kafkaBridgeProducer, kafkaBridgeConsumer)
+                        .build()
+        );
+
         return ConfigMapUtils
                 .createConfigMap(
-                        KafkaBridgeResources.metricsAndLogConfigMapName(cluster),
+                        KafkaBridgeResources.configMapName(cluster),
                         namespace,
                         labels,
                         ownerReference,
-                        ConfigMapUtils.generateMetricsAndLogConfigMapData(reconciliation, this, metricsAndLogging)
+                        data
                 );
     }
 

@@ -10,14 +10,14 @@ import io.fabric8.kubernetes.api.model.PersistentVolumeClaimConditionBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.storage.StorageClass;
 import io.fabric8.kubernetes.api.model.storage.StorageClassBuilder;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.status.KafkaStatus;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaStatus;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.PvcOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.StorageClassOperator;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
-import io.strimzi.operator.common.operator.resource.PvcOperator;
-import io.strimzi.operator.common.operator.resource.StorageClassOperator;
 import io.vertx.core.Future;
 import io.vertx.junit5.Checkpoint;
 import io.vertx.junit5.VertxExtension;
@@ -89,7 +89,7 @@ public class PvcReconcilerTest {
         );
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(true));
 
@@ -135,7 +135,7 @@ public class PvcReconcilerTest {
         );
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(true));
 
@@ -199,7 +199,7 @@ public class PvcReconcilerTest {
         );
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(true));
 
@@ -264,7 +264,7 @@ public class PvcReconcilerTest {
         );
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(false));
                     assertThat(res.cause(), is(instanceOf(IllegalArgumentException.class)));
@@ -327,7 +327,7 @@ public class PvcReconcilerTest {
         KafkaStatus kafkaStatus = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(kafkaStatus, i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(kafkaStatus, pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(true));
 
@@ -399,7 +399,7 @@ public class PvcReconcilerTest {
         KafkaStatus kafkaStatus = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(kafkaStatus, i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(kafkaStatus, pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(true));
 
@@ -468,7 +468,7 @@ public class PvcReconcilerTest {
         KafkaStatus kafkaStatus = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(kafkaStatus, i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(kafkaStatus, pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(true));
 
@@ -536,7 +536,7 @@ public class PvcReconcilerTest {
         );
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(true));
 
@@ -598,12 +598,12 @@ public class PvcReconcilerTest {
         );
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(true));
 
                     assertThat(res.result().size(), is(3));
-                    assertThat(res.result(), is(Set.of("pod-0", "pod-1", "pod-2")));
+                    assertThat(res.result(), is(Set.of(0, 1, 2)));
 
                     assertThat(pvcCaptor.getAllValues().size(), is(0));
 
@@ -657,7 +657,7 @@ public class PvcReconcilerTest {
         );
 
         Checkpoint async = context.checkpoint();
-        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), i -> "pod-" + i, pvcs)
+        reconciler.resizeAndReconcilePvcs(new KafkaStatus(), pvcs)
                 .onComplete(res -> {
                     assertThat(res.succeeded(), is(true));
 

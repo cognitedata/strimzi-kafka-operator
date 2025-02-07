@@ -4,7 +4,7 @@
 
 [id='proc-stopping-cluster-rebalance-{context}']
 
-= Stopping a cluster rebalance
+= Stopping rebalances
 
 Once started, a cluster rebalance operation might take some time to complete and affect the overall performance of the Kafka cluster.
 
@@ -17,24 +17,22 @@ NOTE: The performance of the Kafka cluster in the intermediate (stopped) state m
 
 .Prerequisites
 
-* You have xref:proc-approving-optimization-proposal-{context}[approved the optimization proposal] by annotating the `KafkaRebalance` custom resource with `approve`.
-
 * The status of the `KafkaRebalance` custom resource is `Rebalancing`.
 
 .Procedure
 
-. Annotate the `KafkaRebalance` resource in Kubernetes:
+. Annotate the `KafkaRebalance` resource to stop the rebalance:
 +
-[source,shell,subs="+quotes"]
+[source,shell]
 ----
-kubectl annotate kafkarebalance _rebalance-cr-name_ strimzi.io/rebalance=stop
+kubectl annotate kafkarebalance <kafka_rebalance_resource_name> strimzi.io/rebalance="stop"
 ----
 
 . Check the status of the `KafkaRebalance` resource:
 +
-[source,shell,subs="+quotes"]
+[source,shell]
 ----
-kubectl describe kafkarebalance _rebalance-cr-name_
+kubectl describe kafkarebalance <kafka_rebalance_resource_name>
 ----
 
 . Wait until the status changes to `Stopped`.

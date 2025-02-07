@@ -4,16 +4,16 @@
  */
 package io.strimzi.operator.cluster.model;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import io.strimzi.operator.common.model.InvalidConfigParameterException;
 import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.model.InvalidConfigParameterException;
 import io.strimzi.operator.common.model.OrderedProperties;
 import io.strimzi.test.annotations.ParallelSuite;
 import io.strimzi.test.annotations.ParallelTest;
 import io.vertx.core.json.JsonObject;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static io.strimzi.test.TestUtils.LINE_SEPARATOR;
 import static java.util.Arrays.asList;
@@ -24,7 +24,6 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 @ParallelSuite
 public class AbstractConfigurationTest {
-
     static OrderedProperties createProperties(String... keyValues) {
         OrderedProperties properties = new OrderedProperties();
         for (int i = 0; i < keyValues.length; i += 2) {
@@ -150,10 +149,18 @@ public class AbstractConfigurationTest {
         String configuration = "var1=aaa" + LINE_SEPARATOR +
                 "var2=bbb" + LINE_SEPARATOR +
                 "var3=ccc" + LINE_SEPARATOR +
+                "forbidden.prefix=ddd" + LINE_SEPARATOR +
+                "forbidden.prefix.first=eee" + LINE_SEPARATOR +
+                "forbidden.prefix.second=fff" + LINE_SEPARATOR +
+                "forbidden.prefix.exception=ggg" + LINE_SEPARATOR +
+                "forbidden.option=hhh" + LINE_SEPARATOR +
+                "forbidden.option.not.exact=iii" + LINE_SEPARATOR +
                 "forbidden.option=ddd" + LINE_SEPARATOR;
         OrderedProperties expectedConfiguration = createWithDefaults("var3", "ccc",
                 "var2", "bbb",
-                "var1", "aaa");
+                "var1", "aaa",
+                "forbidden.prefix.exception", "ggg",
+                "forbidden.option.not.exact", "iii");
 
         AbstractConfiguration config = new TestConfiguration(configuration);
         assertThat(config.asOrderedProperties(), is(expectedConfiguration));
@@ -164,7 +171,8 @@ public class AbstractConfigurationTest {
         String configuration = "var1=aaa" + LINE_SEPARATOR +
                 "var2=bbb" + LINE_SEPARATOR +
                 "var3=ccc" + LINE_SEPARATOR +
-                "FORBIDDEN.OPTION=ddd" + LINE_SEPARATOR;
+                "FORBIDDEN.OPTION=ddd" + LINE_SEPARATOR +
+                "FORBIDDEN.PREFIX=eee" + LINE_SEPARATOR;
         OrderedProperties expectedConfiguration = createWithDefaults("var3", "ccc",
                 "var2", "bbb",
                 "var1", "aaa");
@@ -174,29 +182,21 @@ public class AbstractConfigurationTest {
     }
 
     @ParallelTest
-    public void testJsonWithForbiddenKeys() {
+    public void testJsonWithForbiddenPrefixesAndOptions() {
         JsonObject configuration = new JsonObject().put("var1", "aaa")
                 .put("var2", "bbb")
                 .put("var3", "ccc")
-                .put("forbidden.option", "ddd");
+                .put("forbidden.prefix", "ddd")
+                .put("forbidden.prefix.first", "eee")
+                .put("forbidden.prefix.second", "fff")
+                .put("forbidden.prefix.exception", "ggg")
+                .put("forbidden.option", "hhh")
+                .put("forbidden.option.not.exact", "iii");
         OrderedProperties expectedConfiguration = createWithDefaults("var3", "ccc",
                 "var2", "bbb",
-                "var1", "aaa");
-
-        AbstractConfiguration config = new TestConfiguration(configuration);
-        assertThat(config.asOrderedProperties(), is(expectedConfiguration));
-    }
-
-    @ParallelTest
-    public void testJsonWithForbiddenKeysPrefix() {
-        JsonObject configuration = new JsonObject().put("var1", "aaa")
-                .put("var2", "bbb")
-                .put("var3", "ccc")
-                .put("forbidden.option.first", "ddd")
-                .put("forbidden.option.second", "ddd");
-        OrderedProperties expectedConfiguration = createWithDefaults("var3", "ccc",
-                "var2", "bbb",
-                "var1", "aaa");
+                "var1", "aaa",
+                "forbidden.prefix.exception", "ggg",
+                "forbidden.option.not.exact", "iii");
 
         AbstractConfiguration config = new TestConfiguration(configuration);
         assertThat(config.asOrderedProperties(), is(expectedConfiguration));
@@ -225,24 +225,6 @@ public class AbstractConfigurationTest {
     }
 
     @ParallelTest
-    public void testKafkaZookeeperTimeout() {
-        Map<String, Object> conf = new HashMap<>();
-        conf.put("valid", "validValue");
-        conf.put("zookeeper.connection.whatever", "invalid");
-        conf.put("security.invalid1", "invalid");
-        conf.put("zookeeper.connection.timeout.ms", "42"); // valid
-        conf.put("zookeeper.connection.timeout", "42"); // invalid
-
-        KafkaConfiguration kc = new KafkaConfiguration(Reconciliation.DUMMY_RECONCILIATION, conf.entrySet());
-
-        assertThat(kc.asOrderedProperties().asMap().get("valid"), is("validValue"));
-        assertThat(kc.asOrderedProperties().asMap().get("zookeeper.connection.whatever"), is(nullValue()));
-        assertThat(kc.asOrderedProperties().asMap().get("security.invalid1"), is(nullValue()));
-        assertThat(kc.asOrderedProperties().asMap().get("zookeeper.connection.timeout.ms"), is("42"));
-        assertThat(kc.asOrderedProperties().asMap().get("zookeeper.connection.timeout"), is(nullValue()));
-    }
-
-    @ParallelTest
     public void testKafkaCipherSuiteOverride() {
         Map<String, Object> conf = new HashMap<>();
         conf.put("ssl.cipher.suites", "cipher1,cipher2,cipher3"); // valid
@@ -267,49 +249,24 @@ public class AbstractConfigurationTest {
     }
 
     @ParallelTest
-    public void testKafkaMirrorMakerConsumerHostnameVerification() {
-        Map<String, Object> conf = new HashMap<>();
-        conf.put("compression.type", "zstd"); // valid
-        conf.put("ssl.endpoint.identification.algorithm", ""); // valid
-        conf.put("ssl.keystore.location", "/tmp/my.keystore"); // invalid
-
-        KafkaMirrorMakerConsumerConfiguration configuration = new KafkaMirrorMakerConsumerConfiguration(Reconciliation.DUMMY_RECONCILIATION, conf.entrySet());
-
-        assertThat(configuration.asOrderedProperties().asMap().get("compression.type"), is("zstd"));
-        assertThat(configuration.asOrderedProperties().asMap().get("ssl.keystore.location"), is(nullValue()));
-        assertThat(configuration.asOrderedProperties().asMap().get("ssl.endpoint.identification.algorithm"), is(""));
-    }
-
-    @ParallelTest
-    public void testKafkaMirrorMakerProducerHostnameVerification() {
-        Map<String, Object> conf = new HashMap<>();
-        conf.put("compression.type", "zstd"); // valid
-        conf.put("ssl.endpoint.identification.algorithm", ""); // valid
-        conf.put("ssl.keystore.location", "/tmp/my.keystore"); // invalid
-
-        KafkaMirrorMakerProducerConfiguration configuration = new KafkaMirrorMakerProducerConfiguration(Reconciliation.DUMMY_RECONCILIATION, conf.entrySet());
-
-        assertThat(configuration.asOrderedProperties().asMap().get("compression.type"), is("zstd"));
-        assertThat(configuration.asOrderedProperties().asMap().get("ssl.keystore.location"), is(nullValue()));
-        assertThat(configuration.asOrderedProperties().asMap().get("ssl.endpoint.identification.algorithm"), is(""));
-    }
-
-    @ParallelTest
     public void testSplittingOfPrefixes()   {
         String prefixes = "prefix1.field,prefix2.field , prefix3.field, prefix4.field,, ";
         List<String> prefixList = asList("prefix1.field", "prefix2.field", "prefix3.field", "prefix4.field");
 
-        assertThat(AbstractConfiguration.splitPrefixesToList(prefixes).equals(prefixList), is(true));
+        assertThat(AbstractConfiguration.splitPrefixesOrOptionsToList(prefixes).equals(prefixList), is(true));
     }
 }
 
 class TestConfiguration extends AbstractConfiguration {
+    private static final List<String> FORBIDDEN_OPTIONS;
     private static final List<String> FORBIDDEN_PREFIXES;
+    private static final List<String> FORBIDDEN_PREFIXES_EXCEPTIONS;
     private static final Map<String, String> DEFAULTS;
 
     static {
-        FORBIDDEN_PREFIXES = asList(
-                "forbidden.option");
+        FORBIDDEN_PREFIXES = List.of("forbidden.prefix");
+        FORBIDDEN_PREFIXES_EXCEPTIONS = List.of("forbidden.prefix.exception");
+        FORBIDDEN_OPTIONS = List.of("forbidden.option");
 
         DEFAULTS = new HashMap<>();
         DEFAULTS.put("default.option", "hello");
@@ -323,7 +280,7 @@ class TestConfiguration extends AbstractConfiguration {
      *                      pairs.
      */
     public TestConfiguration(String configuration) {
-        super(Reconciliation.DUMMY_RECONCILIATION, configuration, FORBIDDEN_PREFIXES, DEFAULTS);
+        super(Reconciliation.DUMMY_RECONCILIATION, configuration, FORBIDDEN_PREFIXES, FORBIDDEN_PREFIXES_EXCEPTIONS, FORBIDDEN_OPTIONS, DEFAULTS);
     }
 
     /**
@@ -333,16 +290,19 @@ class TestConfiguration extends AbstractConfiguration {
      * @param jsonOptions     Json object with configuration options as key ad value pairs.
      */
     public TestConfiguration(JsonObject jsonOptions) {
-        super(Reconciliation.DUMMY_RECONCILIATION, jsonOptions, FORBIDDEN_PREFIXES, DEFAULTS);
+        super(Reconciliation.DUMMY_RECONCILIATION, jsonOptions, FORBIDDEN_PREFIXES, FORBIDDEN_PREFIXES_EXCEPTIONS, FORBIDDEN_OPTIONS, DEFAULTS);
     }
 }
 
 class TestConfigurationWithoutDefaults extends AbstractConfiguration {
+    private static final List<String> FORBIDDEN_OPTIONS;
     private static final List<String> FORBIDDEN_PREFIXES;
+    private static final List<String> FORBIDDEN_PREFIXES_EXCEPTIONS;
 
     static {
-        FORBIDDEN_PREFIXES = asList(
-                "forbidden.option");
+        FORBIDDEN_PREFIXES = List.of("forbidden.prefix");
+        FORBIDDEN_PREFIXES_EXCEPTIONS = List.of("forbidden.prefix.exception");
+        FORBIDDEN_OPTIONS = List.of("forbidden.option");
     }
 
     /**
@@ -353,7 +313,7 @@ class TestConfigurationWithoutDefaults extends AbstractConfiguration {
      *                      pairs.
      */
     public TestConfigurationWithoutDefaults(String configuration) {
-        super(Reconciliation.DUMMY_RECONCILIATION, configuration, FORBIDDEN_PREFIXES);
+        super(Reconciliation.DUMMY_RECONCILIATION, configuration, FORBIDDEN_PREFIXES, FORBIDDEN_PREFIXES_EXCEPTIONS, FORBIDDEN_OPTIONS, Map.of());
     }
 
     /**
@@ -363,6 +323,6 @@ class TestConfigurationWithoutDefaults extends AbstractConfiguration {
      * @param jsonOptions     Json object with configuration options as key ad value pairs.
      */
     public TestConfigurationWithoutDefaults(JsonObject jsonOptions) {
-        super(Reconciliation.DUMMY_RECONCILIATION, jsonOptions, FORBIDDEN_PREFIXES);
+        super(Reconciliation.DUMMY_RECONCILIATION, jsonOptions, FORBIDDEN_PREFIXES, FORBIDDEN_PREFIXES_EXCEPTIONS, FORBIDDEN_OPTIONS, Map.of());
     }
 }

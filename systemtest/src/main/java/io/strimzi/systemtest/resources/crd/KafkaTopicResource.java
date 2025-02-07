@@ -8,12 +8,12 @@ import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.Crds;
-import io.strimzi.api.kafka.KafkaTopicList;
-import io.strimzi.api.kafka.model.KafkaTopic;
+import io.strimzi.api.kafka.model.topic.KafkaTopic;
+import io.strimzi.api.kafka.model.topic.KafkaTopicList;
 import io.strimzi.systemtest.enums.CustomResourceStatus;
+import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.ResourceOperation;
 import io.strimzi.systemtest.resources.ResourceType;
-import io.strimzi.systemtest.resources.ResourceManager;
 
 import java.util.function.Consumer;
 
@@ -46,7 +46,7 @@ public class KafkaTopicResource implements ResourceType<KafkaTopic> {
 
     @Override
     public boolean waitForReadiness(KafkaTopic resource) {
-        return ResourceManager.waitForResourceStatus(kafkaTopicClient(), resource.getKind(), resource.getMetadata().getNamespace(),
+        return ResourceManager.waitForResourceStatus(resource.getMetadata().getNamespace(), kafkaTopicClient(), resource.getKind(),
             resource.getMetadata().getName(), CustomResourceStatus.Ready, ResourceOperation.getTimeoutForResourceReadiness(resource.getKind()));
     }
 
@@ -54,7 +54,18 @@ public class KafkaTopicResource implements ResourceType<KafkaTopic> {
         return Crds.topicOperation(ResourceManager.kubeClient().getClient());
     }
 
-    public static void replaceTopicResourceInSpecificNamespace(String resourceName, Consumer<KafkaTopic> editor, String namespaceName) {
-        ResourceManager.replaceCrdResource(KafkaTopic.class, KafkaTopicList.class, resourceName, editor, namespaceName);
+    public static void replaceTopicResourceInSpecificNamespace(String namespaceName, String resourceName, Consumer<KafkaTopic> editor) {
+        ResourceManager.replaceCrdResource(namespaceName, KafkaTopic.class, KafkaTopicList.class, resourceName, editor);
+    }
+
+    /**
+     * Retrieves a KafkaTopic object from the Kubernetes API.
+     *
+     * @param namespaceName     The Kubernetes namespace in which the KafkaTopic resides.
+     * @param topicName         The name of the KafkaTopic to retrieve.
+     * @return                  KafkaTopic The KafkaTopic object if found, otherwise null.
+     */
+    public static KafkaTopic getKafkaTopic(String namespaceName, String topicName) {
+        return KafkaTopicResource.kafkaTopicClient().inNamespace(namespaceName).withName(topicName).get();
     }
 }

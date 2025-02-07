@@ -8,10 +8,11 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
-import io.strimzi.api.kafka.model.JvmOptions;
-import io.strimzi.api.kafka.model.KafkaResources;
-import io.strimzi.api.kafka.model.template.ContainerTemplate;
-import io.strimzi.api.kafka.model.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.common.JvmOptions;
+import io.strimzi.api.kafka.model.common.Probe;
+import io.strimzi.api.kafka.model.common.template.ContainerTemplate;
+import io.strimzi.api.kafka.model.common.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.kafka.KafkaResources;
 import io.strimzi.operator.cluster.model.securityprofiles.PodSecurityProviderFactory;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
@@ -65,8 +66,8 @@ public abstract class AbstractModel {
      * Container configuration
      */
     protected ResourceRequirements resources;
-    protected io.strimzi.api.kafka.model.Probe readinessProbeOptions;
-    protected io.strimzi.api.kafka.model.Probe livenessProbeOptions;
+    protected Probe readinessProbeOptions;
+    protected Probe livenessProbeOptions;
 
     /**
      * PodSecurityProvider
@@ -106,7 +107,7 @@ public abstract class AbstractModel {
      * @param reconciliation    The reconciliation marker
      * @param resource          Custom resource with metadata containing the namespace and cluster name
      * @param componentName     Name of the Strimzi component usually consisting from the cluster name and component type
-     * @param componentType     Type of the component that the extending class is deploying (e.g. Kafka, ZooKeeper etc. )
+     * @param componentType     Type of the component that the extending class is deploying (e.g. Kafka etc. )
      * @param sharedEnvironmentProvider Shared environment provider
      */
     protected AbstractModel(Reconciliation reconciliation, HasMetadata resource, String componentName, String componentType, SharedEnvironmentProvider sharedEnvironmentProvider) {
@@ -147,16 +148,6 @@ public abstract class AbstractModel {
      */
     public String getCluster() {
         return cluster;
-    }
-
-    /**
-     * Gets the name of a given pod in a StrimziPodSet.
-     *
-     * @param podId The ID (ordinal) of the pod.
-     * @return The name of the pod with the given name.
-     */
-    public String getPodName(Integer podId) {
-        return componentName + "-" + podId;
     }
 
     /**

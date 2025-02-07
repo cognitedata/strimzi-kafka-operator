@@ -3,11 +3,13 @@
 // assembly-oauth-authorization.adoc
 
 [id='proc-oauth-authorization-keycloak-example_{context}']
-= Trying Keycloak Authorization Services
+= Example: Setting up Keycloak Authorization Services
 
 [role="_abstract"]
+If you are using OAuth 2.0 with Keycloak for token-based authentication,
+you can also use Keycloak to configure authorization rules to constrain client access to Kafka brokers.
 This example explains how to use Keycloak Authorization Services with `keycloak` authorization.
-Use Keycloak Authorization Services to enforce access restrictions on Kafka clients.
+Set up Keycloak Authorization Services to enforce access restrictions on Kafka clients.
 Keycloak Authorization Services use authorization scopes, policies and permissions to define and apply access control to resources.
 
 Keycloak Authorization Services REST endpoints provide a list of granted permissions on resources for authenticated users.
@@ -26,7 +28,7 @@ You can import the realm into a Keycloak instance to set up fine-grained permiss
 
 If you want to try the example with Keycloak, use these files to perform the tasks outlined in this section in the order shown.
 
-. xref:proc-oauth-authorization-keycloak-example-setup_{context}[Accessing the Keycloak Admin Console]
+. xref:proc-oauth-authorization-keycloak-example-setup_{context}[Setting up permissions in Keycloak]
 . xref:proc-oauth-authorization-keycloak-example-deploy-kafka_{context}[Deploying a Kafka cluster with Keycloak authorization]
 . xref:proc-oauth-authorization-keycloak-example-authentication_{context}[Preparing TLS connectivity for a CLI Kafka client session]
 . xref:proc-oauth-authorization-keycloak-example-check_{context}[Checking authorized access to Kafka using a CLI Kafka client session]
@@ -49,7 +51,7 @@ It makes sense to require the user to log in before using the resulting access t
 In this case, the access token represents the specific user, rather than the client application.
 
 [id='proc-oauth-authorization-keycloak-example-setup_{context}']
-== Accessing the Keycloak Admin Console
+== Setting up permissions in Keycloak
 
 Set up Keycloak, then connect to its Admin Console and add the preconfigured realm.
 Use the example `kafka-authz-realm.json` file to import the realm.
@@ -114,24 +116,24 @@ An affirmative policy means that at least one policy must be satisfied for a cli
 
 . In the Keycloak Admin Console, go to *Groups*, *Users*, *Roles* and *Clients* to view the realm configuration.
 +
-Groups:: `Groups` are used to create user groups and set user permissions. Groups are sets of users with a name assigned. They are used to compartmentalize users into geographical, organizational or departmental units.
-Groups can be linked to an LDAP identity provider. You can make a user a member of a group through a custom LDAP server admin user interface, for example, to grant permissions on Kafka resources.
+Groups:: `Groups` organize users and set permissions. 
+Groups can be linked to an LDAP identity provider and used to compartmentalize users, such as by region or department. 
+Users can be added to groups through a custom LDAP interface to manage permissions for Kafka resources.
+For more information on using KeyCloak's LDAP provider, see the guide to {keycloak-admin-guide}.
 
-Users:: `Users` are used to create users. For this example, `alice` and `bob` are defined. `alice` is a member of the `ClusterManager` group and `bob` is a member of `ClusterManager-my-cluster` group.
-Users can be stored in an LDAP identity provider.
+Users:: `Users` define individual users. 
+In this example, `alice` (in the `ClusterManager` group) and `bob` (in `ClusterManager-my-cluster`) are created. 
+Users can also be stored in an LDAP identity provider.
 
-Roles:: `Roles` mark users or clients as having certain permissions.
-Roles are a concept analogous to groups. They are usually used to _tag_ users with organizational roles and have the requisite permissions.
-Roles cannot be stored in an LDAP identity provider.
-If LDAP is a requirement, you can use groups instead, and add Keycloak roles to the groups so that when users are assigned a group they also get a corresponding role.
+Roles:: `Roles` assign specific permissions to users or clients. 
+Roles function like tags to give users certain rights. 
+While roles cannot be stored in LDAP, you can add Keycloak roles to groups to combine both roles and permissions.
 
-Clients:: `Clients` can have specific configurations. For this example, `kafka`, `kafka-cli`, `team-a-client`, and `team-b-client` clients are configured.
+Clients:: `Clients` define configurations for Kafka interactions.
 +
-* The `kafka` client is used by Kafka brokers to perform the necessary OAuth 2.0 communication for access token validation.
-This client also contains the authorization services resource definitions, policies, and authorization scopes used to perform authorization on the Kafka brokers.
-The authorization configuration is defined in the `kafka` client from the *Authorization* tab, which becomes visible when *Authorization Enabled* is switched on from the *Settings* tab.
-* The `kafka-cli` client is a public client that is used by the Kafka command line tools when authenticating with username and password to obtain an access token or a refresh token.
-* The `team-a-client` and `team-b-client` clients are confidential clients representing services with partial access to certain Kafka topics.
+* The `kafka` client handles OAuth 2.0 token validation for brokers and contains authorization policies (which require authorization to be enabled).
+* The `kafka-cli` client is used by command line tools to obtain access or refresh tokens.
+* `team-a-client` and `team-b-client` represent services with partial access to specific Kafka topics.
 
 . In the Keycloak Admin Console, go to *Authorization* > *Permissions* to see the granted permissions that use the resources and policies defined for the realm.
 +
@@ -227,7 +229,7 @@ In the Keycloak Admin Console, check the roles assigned to the clients are displ
 
 .Procedure
 
-. Run a new interactive pod container using the Strimzi Kafka image to connect to a running Kafka broker.
+. Run a new interactive pod container using the Kafka image to connect to a running Kafka broker.
 +
 [source,shell,subs="attributes"]
 ----
@@ -320,14 +322,12 @@ Apply the checks using Kafka's example producer and consumer clients to create t
 Use the `team-a-client` and `team-b-client` clients to check the authorization rules.
 Use the `alice` admin user to perform additional administrative tasks on Kafka.
 
-The Strimzi Kafka image used in this example contains Kafka producer and consumer binaries.
+The Kafka image used in this example contains Kafka producer and consumer binaries.
 
 .Prerequisites
 
-* ZooKeeper and Kafka are running in the Kubernetes cluster to be able to send and receive messages.
+* A Kafka cluster is running in the Kubernetes cluster to be able to send and receive messages.
 * The xref:proc-oauth-authorization-keycloak-example-authentication_{context}[interactive CLI Kafka client session] is started.
-+
-{ApacheKafkaDownload}.
 
 .Setting up client and admin user configuration
 
@@ -346,15 +346,15 @@ sasl.mechanism=OAUTHBEARER
 sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required \
   oauth.client.id="team-a-client" \
   oauth.client.secret="team-a-client-secret" \
-  oauth.ssl.truststore.location="/tmp/truststore.p12" \
+  oauth.ssl.truststore.location="/tmp/oauth-truststore.p12" \
   oauth.ssl.truststore.password="$STOREPASS" \
   oauth.ssl.truststore.type="PKCS12" \
-  oauth.token.endpoint.uri="https://$SSO_HOST/auth/realms/kafka-authz/protocol/openid-connect/token" ;
+  oauth.token.endpoint.uri="https://$SSO_HOST/realms/kafka-authz/protocol/openid-connect/token" ;
 sasl.login.callback.handler.class=io.strimzi.kafka.oauth.client.JaasClientOauthLoginCallbackHandler
 EOF
 ----
 +
-The SASL OAUTHBEARER mechanism is used.
+The SASL `OAUTHBEARER` mechanism is used.
 This mechanism requires a client ID and client secret, which means the client first connects to the Keycloak server to obtain an access token.
 The client then connects to the Kafka broker and uses the access token to authenticate.
 
@@ -371,10 +371,10 @@ sasl.mechanism=OAUTHBEARER
 sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required \
   oauth.client.id="team-b-client" \
   oauth.client.secret="team-b-client-secret" \
-  oauth.ssl.truststore.location="/tmp/truststore.p12" \
+  oauth.ssl.truststore.location="/tmp/oauth-truststore.p12" \
   oauth.ssl.truststore.password="$STOREPASS" \
   oauth.ssl.truststore.type="PKCS12" \
-  oauth.token.endpoint.uri="https://$SSO_HOST/auth/realms/kafka-authz/protocol/openid-connect/token" ;
+  oauth.token.endpoint.uri="https://$SSO_HOST/realms/kafka-authz/protocol/openid-connect/token" ;
 sasl.login.callback.handler.class=io.strimzi.kafka.oauth.client.JaasClientOauthLoginCallbackHandler
 EOF
 ----
@@ -386,7 +386,7 @@ EOF
 USERNAME=alice
 PASSWORD=alice-password
 
-GRANT_RESPONSE=$(curl -X POST "https://$SSO_HOST/auth/realms/kafka-authz/protocol/openid-connect/token" -H 'Content-Type: application/x-www-form-urlencoded' -d "grant_type=password&username=$USERNAME&password=$PASSWORD&client_id=kafka-cli&scope=offline_access" -s -k)
+GRANT_RESPONSE=$(curl -X POST "https://$SSO_HOST/realms/kafka-authz/protocol/openid-connect/token" -H 'Content-Type: application/x-www-form-urlencoded' -d "grant_type=password&username=$USERNAME&password=$PASSWORD&client_id=kafka-cli&scope=offline_access" -s -k)
 
 REFRESH_TOKEN=$(echo $GRANT_RESPONSE | awk -F "refresh_token\":\"" '{printf $2}' | awk -F "\"" '{printf $1}')
 ----
@@ -406,10 +406,10 @@ sasl.mechanism=OAUTHBEARER
 sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required \
   oauth.refresh.token="$REFRESH_TOKEN" \
   oauth.client.id="kafka-cli" \
-  oauth.ssl.truststore.location="/tmp/truststore.p12" \
+  oauth.ssl.truststore.location="/tmp/oauth-truststore.p12" \
   oauth.ssl.truststore.password="$STOREPASS" \
   oauth.ssl.truststore.type="PKCS12" \
-  oauth.token.endpoint.uri="https://$SSO_HOST/auth/realms/kafka-authz/protocol/openid-connect/token" ;
+  oauth.token.endpoint.uri="https://$SSO_HOST/realms/kafka-authz/protocol/openid-connect/token" ;
 sasl.login.callback.handler.class=io.strimzi.kafka.oauth.client.JaasClientOauthLoginCallbackHandler
 EOF
 ----
@@ -674,7 +674,3 @@ bin/kafka-configs.sh --bootstrap-server my-cluster-kafka-bootstrap:9093 --comman
 +
 The cluster configuration for this example is empty.
 
-[role="_additional-resources"]
-.Additional resources
-* {keycloak-server-install-doc}
-* xref:con-mapping-keycloak-authz-services-to-kafka-model_authz-model[Map Keycloak Authorization Services to the Kafka authorization model]

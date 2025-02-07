@@ -4,12 +4,15 @@
  */
 package io.strimzi.operator.cluster.model.cruisecontrol;
 
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaBuilder;
-import io.strimzi.operator.common.model.InvalidResourceException;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
 import io.strimzi.operator.cluster.model.KafkaConfiguration;
-import io.strimzi.operator.common.model.cruisecontrol.CruiseControlConfigurationParameters;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.model.InvalidResourceException;
+import io.strimzi.operator.common.model.cruisecontrol.CruiseControlConfigurationParameters;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -27,22 +30,30 @@ public class CruiseControlMetricsReporterTest {
     private final static String NAMESPACE = "my-namespace";
 
     private final static Kafka KAFKA = new KafkaBuilder()
-                .withNewMetadata()
-                    .withName(NAME)
-                    .withNamespace(NAMESPACE)
-                .endMetadata()
-                .withNewSpec()
+            .withNewMetadata()
+                .withName(NAME)
+                .withNamespace(NAMESPACE)
+                .withAnnotations(Map.of(Annotations.ANNO_STRIMZI_IO_NODE_POOLS, "enabled", Annotations.ANNO_STRIMZI_IO_KRAFT, "enabled"))
+            .endMetadata()
+            .withNewSpec()
                 .withNewKafka()
+                    .withListeners(new GenericKafkaListenerBuilder()
+                            .withName("tls")
+                            .withPort(9092)
+                            .withType(KafkaListenerType.INTERNAL)
+                            .withTls(true)
+                            .build())
                 .endKafka()
-                    .withNewCruiseControl()
-                    .endCruiseControl()
-                .endSpec()
-                .build();
+                .withNewCruiseControl()
+                .endCruiseControl()
+            .endSpec()
+            .build();
 
     @Test
     public void testDisabledCruiseControl() {
         Kafka kafka = new KafkaBuilder(KAFKA)
-                .withNewSpec()
+                .editSpec()
+                    .withCruiseControl(null)
                 .endSpec()
                 .build();
 
@@ -79,7 +90,7 @@ public class CruiseControlMetricsReporterTest {
     @Test
     public void testEnabledCruiseControlWithSettingsFromCC() {
         Kafka kafka = new KafkaBuilder(KAFKA)
-                .withNewSpec()
+                .editSpec()
                     .withNewCruiseControl()
                         .withConfig(Map.of("metric.reporter.topic", "my-custom-topic"))
                     .endCruiseControl()
@@ -93,14 +104,20 @@ public class CruiseControlMetricsReporterTest {
         userConfiguration.put("default.replication.factor", 3);
         userConfiguration.put("min.insync.replicas", 2);
         userConfiguration.put("num.partitions", 20);
+        KafkaConfiguration configuration = new KafkaConfiguration(Reconciliation.DUMMY_RECONCILIATION, userConfiguration.entrySet());
 
-        CruiseControlMetricsReporter ccmr = CruiseControlMetricsReporter.fromCrd(kafka, new KafkaConfiguration(Reconciliation.DUMMY_RECONCILIATION, userConfiguration.entrySet()), 5);
+        CruiseControlMetricsReporter ccmr = CruiseControlMetricsReporter.fromCrd(kafka, configuration, 5);
 
         assertThat(ccmr, is(notNullValue()));
-        assertThat(ccmr.numPartitions(), is(nullValue()));
-        assertThat(ccmr.replicationFactor(), is(nullValue()));
-        assertThat(ccmr.minInSyncReplicas(), is(nullValue())); // This does not inherit the Kafka value
+        assertThat(ccmr.numPartitions(), is(50));
+        assertThat(ccmr.replicationFactor(), is(5));
+        assertThat(ccmr.minInSyncReplicas(), is(4)); // This does not inherit the Kafka value
         assertThat(ccmr.topicName(), is("my-custom-topic"));
+
+        // Values were removed from the Kafka configuration
+        assertThat(configuration.getConfigOption("cruise.control.metrics.topic.num.partitions"), is(nullValue()));
+        assertThat(configuration.getConfigOption("cruise.control.metrics.topic.replication.factor"), is(nullValue()));
+        assertThat(configuration.getConfigOption("cruise.control.metrics.topic.min.insync.replicas"), is(nullValue()));
     }
 
     @Test

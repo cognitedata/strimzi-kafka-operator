@@ -6,8 +6,7 @@ package io.strimzi.kafka.init;
 
 import io.fabric8.kubernetes.api.model.NodeAddress;
 import io.fabric8.kubernetes.client.KubernetesClient;
-
-import io.strimzi.api.kafka.model.listener.NodeAddressType;
+import io.strimzi.api.kafka.model.kafka.listener.NodeAddressType;
 import io.strimzi.operator.common.model.NodeUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -102,12 +101,12 @@ public class InitWriter {
         String envVar;
 
         if (type != null) {
-            envVar = String.format("STRIMZI_NODEPORT_%s_ADDRESS", type.toValue().toUpperCase(Locale.ENGLISH));
+            envVar = String.format("nodeport.%s.address", type.toValue().toLowerCase(Locale.ENGLISH));
         } else {
-            envVar = "STRIMZI_NODEPORT_DEFAULT_ADDRESS";
+            envVar = "nodeport.default.address";
         }
 
-        return String.format("export %s=%s", envVar, address) + System.lineSeparator();
+        return String.format("%s=%s", envVar, address) + System.lineSeparator();
     }
 
     /**

@@ -4,18 +4,20 @@
  */
 package io.strimzi.operator.cluster.model.nodepools;
 
-import io.strimzi.api.kafka.model.Kafka;
+import io.strimzi.api.kafka.model.kafka.JbodStorage;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.Storage;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePool;
 import io.strimzi.api.kafka.model.nodepool.ProcessRoles;
-import io.strimzi.api.kafka.model.storage.JbodStorage;
-import io.strimzi.api.kafka.model.storage.Storage;
-import io.strimzi.operator.common.model.InvalidResourceException;
 import io.strimzi.operator.cluster.model.KafkaPool;
+import io.strimzi.operator.cluster.model.KafkaVersion;
+import io.strimzi.operator.cluster.model.KafkaVersionChange;
 import io.strimzi.operator.cluster.model.ModelUtils;
 import io.strimzi.operator.cluster.model.SharedEnvironmentProvider;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
+import io.strimzi.operator.common.model.InvalidResourceException;
 import org.apache.kafka.common.Uuid;
 
 import java.util.ArrayList;
@@ -31,15 +33,13 @@ public class NodePoolUtils {
     /**
      * Generates KafkaPool instances from Kafka and KafkaNodePool resources.
      *
-     * @param reconciliation    Reconciliation marker
-     * @param kafka             Kafka custom resource
-     * @param nodePools         List of node pools belonging to this cluster
-     * @param oldStorage        Maps with old storage configurations, where the key is the name of the controller
-     *                          resource (e.g. my-cluster-pool-a) and the value is the current storage configuration
-     * @param currentPods       Map with current pods, where the key is the name of the controller resource
-     *                          (e.g. my-cluster-pool-a) and the value is a list with Pod names
-     * @param useKRaft          Flag indicating if KRaft is enabled
-     * @param sharedEnvironmentProvider Shared environment provider
+     * @param reconciliation                Reconciliation marker
+     * @param kafka                         Kafka custom resource
+     * @param nodePools                     List of node pools belonging to this cluster
+     * @param oldStorage                    Maps with old storage configurations, where the key is the name of the controller
+     *                                      resource (e.g. my-cluster-pool-a) and the value is the current storage configuration
+     * @param versionChange                 Describes Kafka versions used by this cluster
+     * @param sharedEnvironmentProvider     Shared environment provider
      *
      * @return  List of KafkaPool instances belonging to given Kafka cluster
      */
@@ -48,63 +48,29 @@ public class NodePoolUtils {
             Kafka kafka,
             List<KafkaNodePool> nodePools,
             Map<String, Storage> oldStorage,
-            Map<String, List<String>> currentPods,
-            boolean useKRaft,
-            SharedEnvironmentProvider sharedEnvironmentProvider
-    )    {
+            KafkaVersionChange versionChange,
+            SharedEnvironmentProvider sharedEnvironmentProvider)    {
         // We create the Kafka pool resources
         List<KafkaPool> pools = new ArrayList<>();
 
-        if (nodePools == null)   {
-            // Node pools are not used => we create the default virtual node pool
+        validateNodePools(reconciliation, kafka, nodePools, versionChange);
 
-            // Name of the controller resource for the virtual node pool
-            String virtualNodePoolComponentName = kafka.getMetadata().getName() + "-" + VirtualNodePoolConverter.DEFAULT_NODE_POOL_NAME;
+        // We prepare ID Assignment
+        NodeIdAssignor assignor = new NodeIdAssignor(reconciliation, nodePools);
 
-            int currentReplicas = 0;
-            if (currentPods.get(virtualNodePoolComponentName) != null) {
-                // We are converting from regular Kafka resource which is not using node pools. So the pods will be numbered
-                // continuously from 0. So we can use this to create the list of currently used Node IDs.
-                currentReplicas = currentPods.get(virtualNodePoolComponentName).size();
-            }
-
-            // We create the virtual KafkaNodePool custom resource
-            KafkaNodePool virtualNodePool = VirtualNodePoolConverter.convertKafkaToVirtualNodePool(kafka, currentReplicas);
-
-            // We prepare ID Assignment
-            NodeIdAssignor assignor = new NodeIdAssignor(reconciliation, List.of(virtualNodePool));
-
+        // We create the Kafka pool resources
+        for (KafkaNodePool nodePool : nodePools) {
             pools.add(
                     KafkaPool.fromCrd(
                             reconciliation,
                             kafka,
-                            virtualNodePool,
-                            assignor.assignmentForPool(virtualNodePool.getMetadata().getName()),
-                            oldStorage.get(virtualNodePoolComponentName),
-                            ModelUtils.createOwnerReference(kafka, false),
+                            nodePool,
+                            assignor.assignmentForPool(nodePool.getMetadata().getName()),
+                            oldStorage.get(KafkaPool.componentName(kafka, nodePool)),
+                            ModelUtils.createOwnerReference(nodePool, false),
                             sharedEnvironmentProvider
                     )
             );
-        } else {
-            validateNodePools(reconciliation, kafka, nodePools, useKRaft);
-
-            // We prepare ID Assignment
-            NodeIdAssignor assignor = new NodeIdAssignor(reconciliation, nodePools);
-
-            // We create the Kafka pool resources
-            for (KafkaNodePool nodePool : nodePools) {
-                pools.add(
-                        KafkaPool.fromCrd(
-                                reconciliation,
-                                kafka,
-                                nodePool,
-                                assignor.assignmentForPool(nodePool.getMetadata().getName()),
-                                oldStorage.get(KafkaPool.componentName(kafka, nodePool)),
-                                ModelUtils.createOwnerReference(nodePool, false),
-                                sharedEnvironmentProvider
-                        )
-                );
-            }
         }
 
         return pools;
@@ -116,9 +82,9 @@ public class NodePoolUtils {
      * @param reconciliation    Reconciliation marker
      * @param kafka             The Kafka custom resource
      * @param nodePools         The list with KafkaNodePool resources
-     * @param useKRaft          Flag indicating whether KRaft is enabled or not
+     * @param versionChange     Describes Kafka versions used by this cluster
      */
-    public static void validateNodePools(Reconciliation reconciliation, Kafka kafka, List<KafkaNodePool> nodePools, boolean useKRaft)    {
+    public static void validateNodePools(Reconciliation reconciliation, Kafka kafka, List<KafkaNodePool> nodePools, KafkaVersionChange versionChange)    {
         // If there are no node pools, the rest of the validation makes no sense, so we throw an exception right away
         if (nodePools.isEmpty()
                 || nodePools.stream().noneMatch(np -> np.getSpec().getReplicas() > 0))    {
@@ -127,17 +93,13 @@ public class NodePoolUtils {
         } else {
             List<String> errors = new ArrayList<>();
 
-            if (useKRaft) {
-                // Validate process roles
-                errors.addAll(validateKRaftProcessRoles(nodePools));
+            // Validate process roles
+            errors.addAll(validateKRaftProcessRoles(nodePools));
 
-                // Validate JBOD storage
-                errors.addAll(validateKRaftJbodStorage(nodePools));
-            } else {
-                // Validate process roles
-                errors.addAll(validateZooKeeperBasedProcessRoles(nodePools));
-            }
+            // Validate JBOD storage
+            errors.addAll(validateKRaftJbodStorage(nodePools, versionChange));
 
+            // Validate ID ranges
             validateNodeIdRanges(reconciliation, nodePools);
 
             // Throw an exception if there are any errors
@@ -145,30 +107,6 @@ public class NodePoolUtils {
                 throw new InvalidResourceException("The Kafka cluster " + kafka.getMetadata().getName() + " is invalid: " + errors);
             }
         }
-    }
-
-    /**
-     * ZooKeeper based cluster needs to have only the broker role. This method checks if this condition is fulfilled.
-     *
-     * @param nodePools     Node pools
-     *
-     * @return  List with errors found during the validation
-     */
-    private static List<String> validateZooKeeperBasedProcessRoles(List<KafkaNodePool> nodePools)    {
-        List<String> errors = new ArrayList<>();
-
-        for (KafkaNodePool pool : nodePools)    {
-            if (pool.getSpec().getRoles() == null || pool.getSpec().getRoles().isEmpty())   {
-                // Pools need to have at least one role
-                errors.add("KafkaNodePool " + pool.getMetadata().getName() + " has no role defined in .spec.roles");
-            } else if (pool.getSpec().getRoles().contains(ProcessRoles.CONTROLLER))   {
-                // ZooKeeper based cluster allows only the broker tole
-                errors.add("KafkaNodePool " + pool.getMetadata().getName() + " contains invalid roles configuration. " +
-                        "In a ZooKeeper-based Kafka cluster, the KafkaNodePool role has to be always set only to the 'broker' role.");
-            }
-        }
-
-        return errors;
     }
 
     /**
@@ -215,21 +153,26 @@ public class NodePoolUtils {
 
 
     /**
-     * In KRaft mode, JBOD storage with multiple disks is currently not supported. This method validates the
-     * KafkaNodePool resources whether they contain JBOD storage with multiple disks or not.
+     * In KRaft mode, JBOD storage with multiple disks is supported from Kafka 3.7.0. But only one disk can be marked as
+     * the one used for storing the metadata.
      *
-     * @param nodePools   List of Kafka Node Pools
+     * @param nodePools         List of Kafka Node Pools
+     * @param versionChange     Describes Kafka versions used by this cluster
      *
      * @return  List with errors found during the validation
      */
-    public static List<String> validateKRaftJbodStorage(List<KafkaNodePool> nodePools)   {
+    public static List<String> validateKRaftJbodStorage(List<KafkaNodePool> nodePools, KafkaVersionChange versionChange)   {
         List<String> errors = new ArrayList<>();
 
         for (KafkaNodePool pool : nodePools)    {
             if (pool.getSpec().getStorage() != null
                     && pool.getSpec().getStorage() instanceof JbodStorage jbod) {
-                if (jbod.getVolumes().size() > 1) {
-                    errors.add("Using more than one disk in a JBOD storage is currently not supported when the UseKRaft feature gate is enabled (in KafkaNodePool " + pool.getMetadata().getName() + ")");
+                if (jbod.getVolumes().size() > 1
+                        && (KafkaVersion.compareDottedVersions(versionChange.from().version(), "3.7.0") < 0 || KafkaVersion.compareDottedIVVersions(versionChange.metadataVersion(), "3.7-IV2") < 0)) {
+                    // When running Kafka older than 3.7.0, JBOD storage is not supported in KRaft.
+                    // This check should be removed when we remove support for Kafka 3.6.x.
+                    // This is tracked in https://github.com/strimzi/strimzi-kafka-operator/issues/9960.
+                    errors.add("Using more than one disk in a JBOD storage in KRaft mode is supported only with Apache Kafka 3.7.0 or newer and metadata version 3.7-IV2 or newer (in KafkaNodePool " + pool.getMetadata().getName() + ")");
                 }
             }
         }

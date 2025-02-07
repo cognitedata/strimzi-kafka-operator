@@ -5,11 +5,11 @@
 package io.strimzi.operator.common.model;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaBuilder;
-import io.strimzi.api.kafka.model.status.Condition;
+import io.strimzi.api.kafka.model.common.Condition;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaBuilder;
 import io.strimzi.operator.common.Reconciliation;
-import io.strimzi.test.TestUtils;
+import io.strimzi.test.ReadWriteUtils;
 import io.strimzi.test.logging.TestLogger;
 import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.Test;
@@ -27,7 +27,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 public class ValidationVisitorTest {
     @Test
     public void testValidationErrorsAreLogged() {
-        Kafka k = TestUtils.fromYaml("/example.yaml", Kafka.class, true);
+        Kafka k = ReadWriteUtils.readObjectFromYamlFileInResources("/example.yaml", Kafka.class, true);
         assertThat(k, is(notNullValue()));
         TestLogger logger = TestLogger.create(ValidationVisitorTest.class);
         HasMetadata resource = new KafkaBuilder()

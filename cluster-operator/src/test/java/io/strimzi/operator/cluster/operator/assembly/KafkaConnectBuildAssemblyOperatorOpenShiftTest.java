@@ -14,43 +14,42 @@ import io.fabric8.openshift.api.model.BuildBuilder;
 import io.fabric8.openshift.api.model.BuildConfig;
 import io.fabric8.openshift.api.model.BuildConfigBuilder;
 import io.fabric8.openshift.api.model.BuildRequest;
-import io.strimzi.api.kafka.KafkaConnectList;
-import io.strimzi.api.kafka.KafkaConnectorList;
-import io.strimzi.api.kafka.model.KafkaConnect;
-import io.strimzi.api.kafka.model.KafkaConnectBuilder;
-import io.strimzi.api.kafka.model.KafkaConnectResources;
-import io.strimzi.api.kafka.model.KafkaConnector;
-import io.strimzi.api.kafka.model.StrimziPodSet;
+import io.strimzi.api.kafka.model.connect.KafkaConnect;
+import io.strimzi.api.kafka.model.connect.KafkaConnectBuilder;
+import io.strimzi.api.kafka.model.connect.KafkaConnectList;
+import io.strimzi.api.kafka.model.connect.KafkaConnectResources;
+import io.strimzi.api.kafka.model.connect.KafkaConnectStatus;
 import io.strimzi.api.kafka.model.connect.build.JarArtifactBuilder;
 import io.strimzi.api.kafka.model.connect.build.Plugin;
 import io.strimzi.api.kafka.model.connect.build.PluginBuilder;
-import io.strimzi.api.kafka.model.status.KafkaConnectStatus;
+import io.strimzi.api.kafka.model.connector.KafkaConnector;
+import io.strimzi.api.kafka.model.connector.KafkaConnectorList;
+import io.strimzi.api.kafka.model.podset.StrimziPodSet;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.KafkaConnectBuild;
 import io.strimzi.operator.cluster.model.KafkaConnectCluster;
 import io.strimzi.operator.cluster.model.KafkaVersion;
-import io.strimzi.operator.cluster.model.PodSetUtils;
 import io.strimzi.operator.cluster.model.MockSharedEnvironmentProvider;
-import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
+import io.strimzi.operator.cluster.model.PodSetUtils;
 import io.strimzi.operator.cluster.model.SharedEnvironmentProvider;
+import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.BuildConfigOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.BuildOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ConfigMapOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.CrdOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.NetworkPolicyOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.PodDisruptionBudgetOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.PodOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.SecretOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ServiceOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.StrimziPodSetOperator;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.resource.BuildConfigOperator;
-import io.strimzi.operator.common.operator.resource.BuildOperator;
-import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
-import io.strimzi.operator.common.operator.resource.CrdOperator;
-import io.strimzi.operator.common.operator.resource.DeploymentOperator;
-import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
-import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
-import io.strimzi.operator.common.operator.resource.PodOperator;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
-import io.strimzi.operator.common.operator.resource.SecretOperator;
-import io.strimzi.operator.common.operator.resource.ServiceOperator;
-import io.strimzi.operator.common.operator.resource.StrimziPodSetOperator;
 import io.strimzi.platform.KubernetesVersion;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -136,7 +135,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Prepare and get mocks
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> mockConnectOps = supplier.connectOperator;
-        DeploymentOperator mockDepOps = supplier.deploymentOperations;
         StrimziPodSetOperator mockPodSetOps = supplier.strimziPodSetOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ConfigMapOperator mockCmOps = supplier.configMapOperations;
@@ -158,9 +156,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Mock and capture service ops
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         when(mockServiceOps.reconcile(any(), anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture());
-
-        // Mock and capture deployment ops
-        when(mockDepOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock Secret ops
         when(mockSecretOps.reconcile(any(), anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
@@ -212,7 +207,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockBuildOps.getAsync(eq(NAMESPACE), eq("build-1"))).thenReturn(Future.succeededFuture(builder));
 
         // Mock and capture NP ops
-        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
+        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.componentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
 
         // Mock and capture PDB ops
         when(mockPdbOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture());
@@ -289,7 +284,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Prepare and get mocks
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> mockConnectOps = supplier.connectOperator;
-        DeploymentOperator mockDepOps = supplier.deploymentOperations;
         StrimziPodSetOperator mockPodSetOps = supplier.strimziPodSetOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ConfigMapOperator mockCmOps = supplier.configMapOperations;
@@ -311,9 +305,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Mock and capture service ops
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         when(mockServiceOps.reconcile(any(), anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture());
-
-        // Mock and capture deployment ops
-        when(mockDepOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock Secret ops
         when(mockSecretOps.reconcile(any(), anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
@@ -356,7 +347,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockBuildOps.getAsync(eq(NAMESPACE), eq("build-1"))).thenReturn(Future.succeededFuture(builder));
 
         // Mock and capture NP ops
-        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
+        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.componentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
 
         // Mock and capture PDB ops
         when(mockPdbOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture());
@@ -427,7 +418,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Prepare and get mocks
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> mockConnectOps = supplier.connectOperator;
-        DeploymentOperator mockDepOps = supplier.deploymentOperations;
         StrimziPodSetOperator mockPodSetOps = supplier.strimziPodSetOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ConfigMapOperator mockCmOps = supplier.configMapOperations;
@@ -449,9 +439,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Mock and capture service ops
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         when(mockServiceOps.reconcile(any(), anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture());
-
-        // Mock and capture deployment ops
-        when(mockDepOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock Secret ops
         when(mockSecretOps.reconcile(any(), anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
@@ -515,7 +502,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockBuildOps.getAsync(eq(NAMESPACE), eq("build-1"))).thenReturn(Future.succeededFuture(builder));
 
         // Mock and capture NP ops
-        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
+        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.componentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
 
         // Mock and capture PDB ops
         when(mockPdbOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture());
@@ -609,7 +596,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Prepare and get mocks
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> mockConnectOps = supplier.connectOperator;
-        DeploymentOperator mockDepOps = supplier.deploymentOperations;
         StrimziPodSetOperator mockPodSetOps = supplier.strimziPodSetOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ConfigMapOperator mockCmOps = supplier.configMapOperations;
@@ -631,9 +617,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Mock and capture service ops
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         when(mockServiceOps.reconcile(any(), anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture());
-
-        // Mock and capture deployment ops
-        when(mockDepOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock Secret ops
         when(mockSecretOps.reconcile(any(), anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
@@ -697,7 +680,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockBuildOps.getAsync(eq(NAMESPACE), eq("build-1"))).thenReturn(Future.succeededFuture(builder));
 
         // Mock and capture NP ops
-        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
+        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.componentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
 
         // Mock and capture PDB ops
         when(mockPdbOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture());
@@ -777,7 +760,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Prepare and get mocks
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> mockConnectOps = supplier.connectOperator;
-        DeploymentOperator mockDepOps = supplier.deploymentOperations;
         StrimziPodSetOperator mockPodSetOps = supplier.strimziPodSetOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ConfigMapOperator mockCmOps = supplier.configMapOperations;
@@ -798,9 +780,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Mock and capture service ops
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         when(mockServiceOps.reconcile(any(), anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture());
-
-        // Mock and capture deployment ops
-        when(mockDepOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock Secret ops
         when(mockSecretOps.reconcile(any(), anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
@@ -838,7 +817,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockBcOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.buildConfigName(NAME)), buildConfigCaptor.capture())).thenReturn(Future.succeededFuture(ReconcileResult.noop(null)));
 
         // Mock and capture NP ops
-        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
+        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.componentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
 
         // Mock and capture PDB ops
         when(mockPdbOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture());
@@ -915,7 +894,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Prepare and get mocks
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> mockConnectOps = supplier.connectOperator;
-        DeploymentOperator mockDepOps = supplier.deploymentOperations;
         StrimziPodSetOperator mockPodSetOps = supplier.strimziPodSetOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ConfigMapOperator mockCmOps = supplier.configMapOperations;
@@ -937,9 +915,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Mock and capture service ops
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         when(mockServiceOps.reconcile(any(), anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture());
-
-        // Mock and capture deployment ops
-        when(mockDepOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock Secret ops
         when(mockSecretOps.reconcile(any(), anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
@@ -1001,7 +976,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockBuildOps.getAsync(eq(NAMESPACE), eq("build-1"))).thenReturn(Future.succeededFuture(builder));
 
         // Mock and capture NP ops
-        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
+        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.componentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
 
         // Mock and capture PDB ops
         when(mockPdbOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture());
@@ -1095,7 +1070,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Prepare and get mocks
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> mockConnectOps = supplier.connectOperator;
-        DeploymentOperator mockDepOps = supplier.deploymentOperations;
         StrimziPodSetOperator mockPodSetOps = supplier.strimziPodSetOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ConfigMapOperator mockCmOps = supplier.configMapOperations;
@@ -1117,9 +1091,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Mock and capture service ops
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         when(mockServiceOps.reconcile(any(), anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture());
-
-        // Mock and capture deployment ops
-        when(mockDepOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock Secret ops
         when(mockSecretOps.reconcile(any(), anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
@@ -1205,7 +1176,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockBcOps.startBuild(eq(NAMESPACE), eq(KafkaConnectResources.buildConfigName(NAME)), buildRequestCaptor.capture())).thenReturn(Future.succeededFuture(newBuilder));
 
         // Mock and capture NP ops
-        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
+        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.componentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
 
         // Mock and capture PDB ops
         when(mockPdbOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture());
@@ -1299,7 +1270,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Prepare and get mocks
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> mockConnectOps = supplier.connectOperator;
-        DeploymentOperator mockDepOps = supplier.deploymentOperations;
         StrimziPodSetOperator mockPodSetOps = supplier.strimziPodSetOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ConfigMapOperator mockCmOps = supplier.configMapOperations;
@@ -1321,9 +1291,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Mock and capture service ops
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         when(mockServiceOps.reconcile(any(), anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture());
-
-        // Mock and capture deployment ops
-        when(mockDepOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock Secret ops
         when(mockSecretOps.reconcile(any(), anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
@@ -1409,7 +1376,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockBcOps.startBuild(eq(NAMESPACE), eq(KafkaConnectResources.buildConfigName(NAME)), buildRequestCaptor.capture())).thenReturn(Future.succeededFuture(newBuilder));
 
         // Mock and capture NP ops
-        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
+        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.componentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
 
         // Mock and capture PDB ops
         when(mockPdbOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture());
@@ -1505,7 +1472,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Prepare and get mocks
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList> mockConnectOps = supplier.connectOperator;
-        DeploymentOperator mockDepOps = supplier.deploymentOperations;
         StrimziPodSetOperator mockPodSetOps = supplier.strimziPodSetOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ConfigMapOperator mockCmOps = supplier.configMapOperations;
@@ -1527,9 +1493,6 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         // Mock and capture service ops
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         when(mockServiceOps.reconcile(any(), anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture());
-
-        // Mock and capture deployment ops
-        when(mockDepOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock Secret ops
         when(mockSecretOps.reconcile(any(), anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
@@ -1615,7 +1578,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockBcOps.startBuild(eq(NAMESPACE), eq(KafkaConnectResources.buildConfigName(NAME)), buildRequestCaptor.capture())).thenReturn(Future.succeededFuture(newBuilder));
 
         // Mock and capture NP ops
-        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
+        when(mockNetPolOps.reconcile(any(), eq(NAMESPACE), eq(KafkaConnectResources.componentName(NAME)), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new NetworkPolicy())));
 
         // Mock and capture PDB ops
         when(mockPdbOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture());

@@ -15,18 +15,17 @@ import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodSecurityContext;
 import io.fabric8.kubernetes.api.model.PodTemplateSpec;
 import io.fabric8.kubernetes.api.model.PodTemplateSpecBuilder;
-import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder;
 import io.fabric8.kubernetes.api.model.apps.DeploymentStrategy;
 import io.fabric8.kubernetes.api.model.apps.DeploymentStrategyBuilder;
 import io.fabric8.kubernetes.api.model.apps.RollingUpdateDeploymentBuilder;
-import io.strimzi.api.kafka.model.StrimziPodSet;
-import io.strimzi.api.kafka.model.StrimziPodSetBuilder;
-import io.strimzi.api.kafka.model.template.DeploymentTemplate;
-import io.strimzi.api.kafka.model.template.PodTemplate;
-import io.strimzi.api.kafka.model.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.common.template.DeploymentTemplate;
+import io.strimzi.api.kafka.model.common.template.PodTemplate;
+import io.strimzi.api.kafka.model.common.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.podset.StrimziPodSet;
+import io.strimzi.api.kafka.model.podset.StrimziPodSetBuilder;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
@@ -185,6 +184,36 @@ public class WorkloadUtils {
     }
 
     /**
+     * Patch a Strimzi PodSet to merge the provided annotations with the annotations on the Pod resources defined
+     * in the PodSet
+     *
+     * @param strimziPodSet             Strimzi PodSet to patch
+     * @param annotationsToBeUpdated    Annotations to merge with the existing annotations
+     *
+     * @return Patched PodSet
+     */
+    public static StrimziPodSet patchAnnotations(StrimziPodSet strimziPodSet, Map<String, String> annotationsToBeUpdated) {
+        List<Map<String, Object>> newPods = PodSetUtils.podSetToPods(strimziPodSet)
+                .stream()
+                .map(pod -> {
+                    Map<String, String> updatedAnnotations = pod.getMetadata().getAnnotations();
+                    updatedAnnotations.putAll(annotationsToBeUpdated);
+                    return pod.edit()
+                            .editMetadata()
+                                .withAnnotations(updatedAnnotations)
+                            .endMetadata()
+                            .build();
+                })
+                .map(PodSetUtils::podToMap)
+                .toList();
+        return new StrimziPodSetBuilder(strimziPodSet)
+                .editSpec()
+                    .withPods(newPods)
+                .endSpec()
+                .build();
+    }
+
+    /**
      * Creates a stateful Pod for use with StrimziPodSets. Stateful in this context means that it has a stable name and
      * typically uses storage.
      *
@@ -229,7 +258,7 @@ public class WorkloadUtils {
         Pod pod = new PodBuilder()
                 .withNewMetadata()
                     .withName(name)
-                    .withLabels(labels.withStrimziPodName(name).withStatefulSetPod(name).withStrimziPodSetController(strimziPodSetName).withAdditionalLabels(Util.mergeLabelsOrAnnotations(defaultPodLabels, TemplateUtils.labels(template))).toMap())
+                    .withLabels(labels.withStrimziPodName(name).withStrimziPodSetController(strimziPodSetName).withAdditionalLabels(Util.mergeLabelsOrAnnotations(defaultPodLabels, TemplateUtils.labels(template))).toMap())
                     .withNamespace(namespace)
                     .withAnnotations(Util.mergeLabelsOrAnnotations(podAnnotations, TemplateUtils.annotations(template)))
                 .endMetadata()
@@ -243,13 +272,15 @@ public class WorkloadUtils {
                     .withInitContainers(initContainers)
                     .withContainers(containers)
                     .withVolumes(volumes)
-                    .withTolerations(template != null && template.getTolerations() != null ? removeEmptyValuesFromTolerations(template.getTolerations()) : null)
+                    .withTolerations(template != null && template.getTolerations() != null ? template.getTolerations() : null)
                     .withTerminationGracePeriodSeconds(template != null ? (long) template.getTerminationGracePeriodSeconds() : 30L)
                     .withImagePullSecrets(imagePullSecrets(template, defaultImagePullSecrets))
                     .withSecurityContext(podSecurityContext)
                     .withPriorityClassName(template != null ? template.getPriorityClassName() : null)
                     .withSchedulerName(template != null && template.getSchedulerName() != null ? template.getSchedulerName() : "default-scheduler")
                     .withHostAliases(template != null ? template.getHostAliases() : null)
+                    .withDnsPolicy(template != null && template.getDnsPolicy() != null ? template.getDnsPolicy().toValue() : null)
+                    .withDnsConfig(template != null ? template.getDnsConfig() : null)
                     .withTopologySpreadConstraints(template != null ? template.getTopologySpreadConstraints() : null)
                 .endSpec()
                 .build();
@@ -303,13 +334,15 @@ public class WorkloadUtils {
                     .withInitContainers(initContainers)
                     .withContainers(containers)
                     .withVolumes(volumes)
-                    .withTolerations(template != null && template.getTolerations() != null ? removeEmptyValuesFromTolerations(template.getTolerations()) : null)
+                    .withTolerations(template != null && template.getTolerations() != null ? template.getTolerations() : null)
                     .withTerminationGracePeriodSeconds(template != null ? (long) template.getTerminationGracePeriodSeconds() : 30L)
                     .withImagePullSecrets(imagePullSecrets(template, defaultImagePullSecrets))
                     .withSecurityContext(podSecurityContext)
                     .withPriorityClassName(template != null ? template.getPriorityClassName() : null)
                     .withSchedulerName(template != null && template.getSchedulerName() != null ? template.getSchedulerName() : "default-scheduler")
                     .withHostAliases(template != null ? template.getHostAliases() : null)
+                    .withDnsPolicy(template != null && template.getDnsPolicy() != null ? template.getDnsPolicy().toValue() : null)
+                    .withDnsConfig(template != null ? template.getDnsConfig() : null)
                     .withTopologySpreadConstraints(template != null ? template.getTopologySpreadConstraints() : null)
                 .endSpec()
                 .build();
@@ -366,13 +399,15 @@ public class WorkloadUtils {
                     .withInitContainers(initContainers)
                     .withContainers(containers)
                     .withVolumes(volumes)
-                    .withTolerations(template != null && template.getTolerations() != null ? removeEmptyValuesFromTolerations(template.getTolerations()) : null)
+                    .withTolerations(template != null && template.getTolerations() != null ? template.getTolerations() : null)
                     .withTerminationGracePeriodSeconds(template != null ? (long) template.getTerminationGracePeriodSeconds() : 30L)
                     .withImagePullSecrets(imagePullSecrets(template, defaultImagePullSecrets))
                     .withSecurityContext(podSecurityContext)
                     .withPriorityClassName(template != null ? template.getPriorityClassName() : null)
                     .withSchedulerName(template != null && template.getSchedulerName() != null ? template.getSchedulerName() : "default-scheduler")
                     .withHostAliases(template != null ? template.getHostAliases() : null)
+                    .withDnsPolicy(template != null && template.getDnsPolicy() != null ? template.getDnsPolicy().toValue() : null)
+                    .withDnsConfig(template != null ? template.getDnsConfig() : null)
                     .withTopologySpreadConstraints(template != null ? template.getTopologySpreadConstraints() : null)
                 .endSpec()
                 .build();
@@ -385,7 +420,7 @@ public class WorkloadUtils {
      *
      * @return  Created deployment strategy
      */
-    public static DeploymentStrategy deploymentStrategy(io.strimzi.api.kafka.model.template.DeploymentStrategy strategy) {
+    public static DeploymentStrategy deploymentStrategy(io.strimzi.api.kafka.model.common.template.DeploymentStrategy strategy) {
         return switch (strategy) {
             case ROLLING_UPDATE -> rollingUpdateStrategy();
             case RECREATE -> recreateStrategy();
@@ -416,24 +451,6 @@ public class WorkloadUtils {
                         .withMaxUnavailable(new IntOrString(0))
                         .build())
                 .build();
-    }
-
-    /**
-     * If the toleration value is an empty string, set it to null. That solves an issue when built STS contains a filed
-     * with an empty property value. K8s is removing properties like this, and thus we cannot fetch an equal STS which was
-     * created with (some) empty value.
-     *
-     * @param tolerations   Tolerations list to check whether toleration value is an empty string and eventually replace it by null
-     *
-     * @return              List of tolerations with fixed empty strings
-     */
-    public static List<Toleration> removeEmptyValuesFromTolerations(List<Toleration> tolerations) {
-        if (tolerations != null) {
-            tolerations.stream().filter(toleration -> toleration.getValue() != null && toleration.getValue().isEmpty()).forEach(emptyValTol -> emptyValTol.setValue(null));
-            return tolerations;
-        } else {
-            return null;
-        }
     }
 
     /**

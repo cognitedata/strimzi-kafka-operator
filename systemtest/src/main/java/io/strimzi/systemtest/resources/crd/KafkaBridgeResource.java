@@ -10,12 +10,12 @@ import io.fabric8.kubernetes.api.model.LabelSelectorBuilder;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.Crds;
-import io.strimzi.api.kafka.KafkaBridgeList;
-import io.strimzi.api.kafka.model.KafkaBridge;
+import io.strimzi.api.kafka.model.bridge.KafkaBridge;
+import io.strimzi.api.kafka.model.bridge.KafkaBridgeList;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.systemtest.enums.CustomResourceStatus;
-import io.strimzi.systemtest.resources.ResourceType;
 import io.strimzi.systemtest.resources.ResourceManager;
+import io.strimzi.systemtest.resources.ResourceType;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -57,8 +57,8 @@ public class KafkaBridgeResource implements ResourceType<KafkaBridge> {
         return Crds.kafkaBridgeOperation(ResourceManager.kubeClient().getClient());
     }
 
-    public static void replaceBridgeResourceInSpecificNamespace(String resourceName, Consumer<KafkaBridge> editor, String namespaceName) {
-        ResourceManager.replaceCrdResource(KafkaBridge.class, KafkaBridgeList.class, resourceName, editor, namespaceName);
+    public static void replaceBridgeResourceInSpecificNamespace(String namespaceName, String resourceName, Consumer<KafkaBridge> editor) {
+        ResourceManager.replaceCrdResource(namespaceName, KafkaBridge.class, KafkaBridgeList.class, resourceName, editor);
     }
 
     public static LabelSelector getLabelSelector(String clusterName, String componentName) {

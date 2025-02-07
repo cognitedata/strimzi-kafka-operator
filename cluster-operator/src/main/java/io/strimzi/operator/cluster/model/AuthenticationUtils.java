@@ -7,15 +7,13 @@ package io.strimzi.operator.cluster.model;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
-import io.strimzi.api.kafka.model.CertSecretSource;
-import io.strimzi.api.kafka.model.GenericSecretSource;
-import io.strimzi.api.kafka.model.authentication.KafkaClientAuthentication;
-import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationOAuth;
-import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationPlain;
-import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationScram;
-import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationTls;
+import io.strimzi.api.kafka.model.common.GenericSecretSource;
+import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthentication;
+import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthenticationOAuth;
+import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthenticationPlain;
+import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthenticationScram;
+import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthenticationTls;
 import io.strimzi.kafka.oauth.client.ClientConfig;
-import io.strimzi.kafka.oauth.server.ServerConfig;
 import io.strimzi.operator.common.model.InvalidResourceException;
 
 import java.util.ArrayList;
@@ -85,14 +83,16 @@ public class AuthenticationUtils {
     }
 
     private static void validateClientAuthenticationOAuth(KafkaClientAuthenticationOAuth auth) {
-        boolean accessTokenCase = auth.getAccessToken() != null;
+        boolean accessTokenCase = auth.getAccessToken() != null || auth.getAccessTokenLocation() != null;
+        boolean accessTokenLocationCase = auth.getAccessTokenLocation() != null;
         boolean refreshTokenCase = auth.getTokenEndpointUri() != null && auth.getClientId() != null && auth.getRefreshToken() != null;
         boolean clientSecretCase = auth.getTokenEndpointUri() != null && auth.getClientId() != null && auth.getClientSecret() != null;
         boolean passwordGrantCase = auth.getTokenEndpointUri() != null && auth.getClientId() != null && auth.getUsername() != null && auth.getPasswordSecret() != null;
+        boolean clientAssertionCase = auth.getTokenEndpointUri() != null && auth.getClientId() != null && (auth.getClientAssertion() != null || auth.getClientAssertionLocation() != null);
 
         // If not one of valid cases throw exception
-        if (!(accessTokenCase || refreshTokenCase || clientSecretCase || passwordGrantCase)) {
-            throw new InvalidResourceException("OAUTH authentication selected, but some options are missing. You have to specify one of the following combinations: [accessToken], [tokenEndpointUri, clientId, refreshToken], [tokenEndpointUri, clientId, clientSecret], [tokenEndpointUri, username, password, clientId].");
+        if (!(accessTokenCase || accessTokenLocationCase || refreshTokenCase || clientSecretCase || passwordGrantCase || clientAssertionCase)) {
+            throw new InvalidResourceException("OAUTH authentication selected, but some options are missing. You have to specify one of the following combinations: [accessToken], [accessTokenLocation], [tokenEndpointUri, clientId, refreshToken], [tokenEndpointUri, clientId, clientSecret], [tokenEndpointUri, clientId, clientAssertion], [tokenEndpointUri, clientId, clientAssertionLocation], [tokenEndpointUri, username, password, clientId].");
         }
 
         // Additional validation
@@ -149,11 +149,14 @@ public class AuthenticationUtils {
             } else if (authentication instanceof KafkaClientAuthenticationScram scramAuth) {
                 addNewVolume(volumeList, volumeNamePrefix, scramAuth.getPasswordSecret().getSecretName(), isOpenShift);
             } else if (authentication instanceof KafkaClientAuthenticationOAuth oauth) {
-                volumeList.addAll(configureOauthCertificateVolumes(oauthVolumeNamePrefix, oauth.getTlsTrustedCertificates(), isOpenShift));
+                CertUtils.createTrustedCertificatesVolumes(volumeList, oauth.getTlsTrustedCertificates(), isOpenShift, oauthVolumeNamePrefix);
 
                 if (createOAuthSecretVolumes) {
                     if (oauth.getClientSecret() != null) {
                         addNewVolume(volumeList, volumeNamePrefix, oauth.getClientSecret().getSecretName(), isOpenShift);
+                    }
+                    if (oauth.getClientAssertion() != null) {
+                        addNewVolume(volumeList, volumeNamePrefix, oauth.getClientAssertion().getSecretName(), isOpenShift);
                     }
                     if (oauth.getAccessToken() != null) {
                         addNewVolume(volumeList, volumeNamePrefix, oauth.getAccessToken().getSecretName(), isOpenShift);
@@ -219,11 +222,14 @@ public class AuthenticationUtils {
             } else if (authentication instanceof KafkaClientAuthenticationScram scramAuth) {
                 volumeMountList.add(VolumeUtils.createVolumeMount(volumeNamePrefix + scramAuth.getPasswordSecret().getSecretName(), passwordVolumeMount + scramAuth.getPasswordSecret().getSecretName()));
             } else if (authentication instanceof KafkaClientAuthenticationOAuth oauth) {
-                volumeMountList.addAll(configureOauthCertificateVolumeMounts(oauthVolumeNamePrefix, oauth.getTlsTrustedCertificates(), oauthCertsVolumeMount));
+                CertUtils.createTrustedCertificatesVolumeMounts(volumeMountList, oauth.getTlsTrustedCertificates(), oauthCertsVolumeMount, oauthVolumeNamePrefix);
             
                 if (mountOAuthSecretVolumes) {
                     if (oauth.getClientSecret() != null) {
                         volumeMountList.add(VolumeUtils.createVolumeMount(volumeNamePrefix + oauth.getClientSecret().getSecretName(), oauthSecretsVolumeMount + oauth.getClientSecret().getSecretName()));
+                    }
+                    if (oauth.getClientAssertion() != null) {
+                        volumeMountList.add(VolumeUtils.createVolumeMount(volumeNamePrefix + oauth.getClientAssertion().getSecretName(), oauthSecretsVolumeMount + oauth.getClientAssertion().getSecretName()));
                     }
                     if (oauth.getAccessToken() != null) {
                         volumeMountList.add(VolumeUtils.createVolumeMount(volumeNamePrefix + oauth.getAccessToken().getSecretName(), oauthSecretsVolumeMount + oauth.getAccessToken().getSecretName()));
@@ -268,6 +274,9 @@ public class AuthenticationUtils {
                 if (oauth.getClientSecret() != null) {
                     varList.add(ContainerUtils.createEnvVarFromSecret(envVarNamer.apply("OAUTH_CLIENT_SECRET"), oauth.getClientSecret().getSecretName(), oauth.getClientSecret().getKey()));
                 }
+                if (oauth.getClientAssertion() != null) {
+                    varList.add(ContainerUtils.createEnvVarFromSecret(envVarNamer.apply("OAUTH_CLIENT_ASSERTION"), oauth.getClientAssertion().getSecretName(), oauth.getClientAssertion().getKey()));
+                }
                 if (oauth.getAccessToken() != null) {
                     varList.add(ContainerUtils.createEnvVarFromSecret(envVarNamer.apply("OAUTH_ACCESS_TOKEN"), oauth.getAccessToken().getSecretName(), oauth.getAccessToken().getKey()));
                 }
@@ -276,6 +285,10 @@ public class AuthenticationUtils {
                 }
                 if (oauth.getPasswordSecret() != null) {
                     varList.add(ContainerUtils.createEnvVarFromSecret(envVarNamer.apply("OAUTH_PASSWORD_GRANT_PASSWORD"), oauth.getPasswordSecret().getSecretName(), oauth.getPasswordSecret().getPassword()));
+                }
+
+                if (oauth.getTlsTrustedCertificates() != null && !oauth.getTlsTrustedCertificates().isEmpty()) {
+                    varList.add(ContainerUtils.createEnvVar(envVarNamer.apply("OAUTH_TRUSTED_CERTS"), CertUtils.trustedCertsEnvVar(oauth.getTlsTrustedCertificates())));
                 }
             }
         }
@@ -286,17 +299,17 @@ public class AuthenticationUtils {
      * @return The OAuth JAAS configuration options.
      */
     public static Map<String, String> oauthJaasOptions(KafkaClientAuthenticationOAuth oauth) {
-        Map<String, String> options = new LinkedHashMap<>(13);
+        Map<String, String> options = new LinkedHashMap<>();
         addOption(options, ClientConfig.OAUTH_CLIENT_ID, oauth.getClientId());
         addOption(options, ClientConfig.OAUTH_PASSWORD_GRANT_USERNAME, oauth.getUsername());
         addOption(options, ClientConfig.OAUTH_TOKEN_ENDPOINT_URI, oauth.getTokenEndpointUri());
         addOption(options, ClientConfig.OAUTH_SCOPE, oauth.getScope());
         addOption(options, ClientConfig.OAUTH_AUDIENCE, oauth.getAudience());
         if (oauth.isDisableTlsHostnameVerification()) {
-            options.put(ServerConfig.OAUTH_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM, "");
+            options.put(ClientConfig.OAUTH_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM, "");
         }
         if (!oauth.isAccessTokenIsJwt()) {
-            options.put(ServerConfig.OAUTH_ACCESS_TOKEN_IS_JWT, "false");
+            options.put(ClientConfig.OAUTH_ACCESS_TOKEN_IS_JWT, "false");
         }
         addOptionIfGreaterThanZero(options, ClientConfig.OAUTH_MAX_TOKEN_EXPIRY_SECONDS, oauth.getMaxTokenExpirySeconds());
         addOptionIfGreaterThanZero(options, ClientConfig.OAUTH_CONNECT_TIMEOUT_SECONDS, oauth.getConnectTimeoutSeconds());
@@ -304,10 +317,20 @@ public class AuthenticationUtils {
         addOptionIfGreaterThanZero(options, ClientConfig.OAUTH_HTTP_RETRIES, oauth.getHttpRetries());
         addOptionIfGreaterThanZero(options, ClientConfig.OAUTH_HTTP_RETRY_PAUSE_MILLIS, oauth.getHttpRetryPauseMs());
         if (oauth.isEnableMetrics()) {
-            options.put(ServerConfig.OAUTH_ENABLE_METRICS, "true");
+            options.put(ClientConfig.OAUTH_ENABLE_METRICS, "true");
         }
         if (!oauth.isIncludeAcceptHeader()) {
-            options.put(ServerConfig.OAUTH_INCLUDE_ACCEPT_HEADER, "false");
+            options.put(ClientConfig.OAUTH_INCLUDE_ACCEPT_HEADER, "false");
+        }
+        addOption(options, ClientConfig.OAUTH_ACCESS_TOKEN_LOCATION, oauth.getAccessTokenLocation());
+        addOption(options, ClientConfig.OAUTH_CLIENT_ASSERTION_LOCATION, oauth.getClientAssertionLocation());
+        addOption(options, ClientConfig.OAUTH_CLIENT_ASSERTION_TYPE, oauth.getClientAssertionType());
+
+        Map<String, String> saslExtensions = oauth.getSaslExtensions();
+        if (saslExtensions != null && !saslExtensions.isEmpty()) {
+            for (Map.Entry<String, String> ent: saslExtensions.entrySet()) {
+                addOption(options, ClientConfig.OAUTH_SASL_EXTENSION_PREFIX + ent.getKey(), ent.getValue());
+            }
         }
         return options;
     }
@@ -322,34 +345,6 @@ public class AuthenticationUtils {
         if (value != null) {
             options.put(name, value);
         }
-    }
-
-    /**
-     * Generates volumes needed for certificates needed to connect to OAuth server.
-     * This is used in both OAuth servers and clients.
-     *
-     * @param volumeNamePrefix    Prefix for naming the secret volumes
-     * @param trustedCertificates   List of certificates which should be mounted
-     * @param isOpenShift   Flag whether we are on OpenShift or not
-     *
-     * @return List of new Volumes
-     */
-    public static List<Volume> configureOauthCertificateVolumes(String volumeNamePrefix, List<CertSecretSource> trustedCertificates, boolean isOpenShift)   {
-        List<Volume> newVolumes = new ArrayList<>();
-
-        if (trustedCertificates != null && trustedCertificates.size() > 0) {
-            int i = 0;
-
-            for (CertSecretSource certSecretSource : trustedCertificates) {
-                Map<String, String> items = Collections.singletonMap(certSecretSource.getCertificate(), "tls.crt");
-                String volumeName = String.format("%s-%d", volumeNamePrefix, i);
-                Volume vol = VolumeUtils.createSecretVolume(volumeName, certSecretSource.getSecretName(), items, isOpenShift);
-                newVolumes.add(vol);
-                i++;
-            }
-        }
-
-        return newVolumes;
     }
 
     /**
@@ -377,32 +372,6 @@ public class AuthenticationUtils {
         }
 
         return newVolumes;
-    }
-
-    /**
-     * Generates volume mounts needed for certificates needed to connect to OAuth server.
-     * This is used in both OAuth servers and clients.
-     *
-     * @param volumeNamePrefix   Prefix which was used to name the secret volumes
-     * @param trustedCertificates   List of certificates which should be mounted
-     * @param baseVolumeMount   The Base volume into which the certificates should be mounted
-     *
-     * @return List of new VolumeMounts
-     */
-    public static List<VolumeMount> configureOauthCertificateVolumeMounts(String volumeNamePrefix, List<CertSecretSource> trustedCertificates, String baseVolumeMount)   {
-        List<VolumeMount> newVolumeMounts = new ArrayList<>();
-
-        if (trustedCertificates != null && trustedCertificates.size() > 0) {
-            int i = 0;
-
-            for (CertSecretSource certSecretSource : trustedCertificates) {
-                String volumeName = String.format("%s-%d", volumeNamePrefix, i);
-                newVolumeMounts.add(VolumeUtils.createVolumeMount(volumeName, String.format("%s/%s-%d", baseVolumeMount, certSecretSource.getSecretName(), i)));
-                i++;
-            }
-        }
-
-        return newVolumeMounts;
     }
 
     /**

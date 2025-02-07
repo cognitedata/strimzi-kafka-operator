@@ -7,20 +7,15 @@ package io.strimzi.systemtest.templates.kubernetes;
 import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyBuilder;
-import io.strimzi.systemtest.Constants;
+import io.strimzi.systemtest.TestConstants;
 import io.strimzi.systemtest.enums.DefaultNetworkPolicy;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.junit.jupiter.api.extension.ExtensionContext;
 
 public class NetworkPolicyTemplates {
-
-    private static final Logger LOGGER = LogManager.getLogger(NetworkPolicyTemplates.class);
 
     public static NetworkPolicyBuilder networkPolicyBuilder(String namespace, String name, LabelSelector labelSelector) {
         return new NetworkPolicyBuilder()
             .withApiVersion("networking.k8s.io/v1")
-                .withKind(Constants.NETWORK_POLICY)
+                .withKind(TestConstants.NETWORK_POLICY)
                     .withNewMetadata()
                         .withName(name + "-allow")
                         .withNamespace(namespace)
@@ -35,10 +30,10 @@ public class NetworkPolicyTemplates {
                     .endSpec();
     }
 
-    public static NetworkPolicy applyDefaultNetworkPolicy(ExtensionContext extensionContext, String namespace, DefaultNetworkPolicy policy) {
+    public static NetworkPolicy defaultNetworkPolicy(String namespace, DefaultNetworkPolicy policy) {
         NetworkPolicy networkPolicy = new NetworkPolicyBuilder()
             .withApiVersion("networking.k8s.io/v1")
-            .withKind(Constants.NETWORK_POLICY)
+            .withKind(TestConstants.NETWORK_POLICY)
             .withNewMetadata()
                 .withName("global-network-policy")
                 .withNamespace(namespace)
@@ -58,8 +53,6 @@ public class NetworkPolicyTemplates {
                 .endSpec()
                 .build();
         }
-
-        LOGGER.debug("Creating NetworkPolicy: {}", networkPolicy.toString());
 
         return networkPolicy;
     }

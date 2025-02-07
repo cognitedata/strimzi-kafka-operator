@@ -14,7 +14,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static java.lang.String.format;
 
 public class ConnectCluster {
     private int numNodes;
@@ -46,11 +49,11 @@ public class ConnectCluster {
             workerProps.put("value.converter", "org.apache.kafka.connect.json.JsonConverter");
             workerProps.put("value.converter.schemas.enable", "false");
             workerProps.put("offset.storage.topic", getClass().getSimpleName() + "-offsets");
-            workerProps.put("offset.storage.replication.factor", "3");
+            workerProps.put("offset.storage.replication.factor", "1");
             workerProps.put("config.storage.topic", getClass().getSimpleName() + "-config");
-            workerProps.put("config.storage.replication.factor", "3");
+            workerProps.put("config.storage.replication.factor", "1");
             workerProps.put("status.storage.topic", getClass().getSimpleName() + "-status");
-            workerProps.put("status.storage.replication.factor", "3");
+            workerProps.put("status.storage.replication.factor", "1");
             workerProps.put("bootstrap.servers", brokerList);
 
             CountDownLatch l = new CountDownLatch(1); // Indicates that the Kafka Connect cluster startup is finished (successfully or not)
@@ -60,6 +63,7 @@ public class ConnectCluster {
                 try {
                     ConnectDistributed connectDistributed = new ConnectDistributed();
                     Connect connect = connectDistributed.startConnect(workerProps);
+                    waitForAllServicesToStart(connect, 120);
                     connectInstances.add(connect);
                     connectPorts.add(port);
                     l.countDown();
@@ -78,6 +82,19 @@ public class ConnectCluster {
                 // If the Kafka Connect node failed to start (i.e. raised an exception during the start), we should throw an exception to fail the tests
                 throw new RuntimeException("Failed to start node " + i + " of the Kafka Connect cluster", startupException.get());
             }
+        }
+    }
+
+    private static void waitForAllServicesToStart(Connect connect, int seconds) {
+        while (!connect.herder().isReady() && seconds-- > 0) {
+            try {
+                TimeUnit.SECONDS.sleep(1);
+            } catch (InterruptedException e) {
+                throw new ConnectException(e);
+            }
+        }
+        if (!connect.herder().isReady()) {
+            throw new ConnectException(format("Connect failed to start."));
         }
     }
 

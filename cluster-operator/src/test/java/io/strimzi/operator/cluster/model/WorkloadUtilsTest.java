@@ -19,6 +19,9 @@ import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.PodDNSConfig;
+import io.fabric8.kubernetes.api.model.PodDNSConfigBuilder;
+import io.fabric8.kubernetes.api.model.PodDNSConfigOptionBuilder;
 import io.fabric8.kubernetes.api.model.PodSecurityContext;
 import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.PodTemplateSpec;
@@ -29,13 +32,15 @@ import io.fabric8.kubernetes.api.model.TopologySpreadConstraint;
 import io.fabric8.kubernetes.api.model.TopologySpreadConstraintBuilder;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.DeploymentStrategy;
-import io.strimzi.api.kafka.model.StrimziPodSet;
-import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
-import io.strimzi.api.kafka.model.storage.Storage;
-import io.strimzi.api.kafka.model.template.DeploymentTemplateBuilder;
-import io.strimzi.api.kafka.model.template.PodTemplate;
-import io.strimzi.api.kafka.model.template.PodTemplateBuilder;
-import io.strimzi.api.kafka.model.template.ResourceTemplateBuilder;
+import io.strimzi.api.kafka.model.common.template.DeploymentTemplateBuilder;
+import io.strimzi.api.kafka.model.common.template.DnsPolicy;
+import io.strimzi.api.kafka.model.common.template.PodTemplate;
+import io.strimzi.api.kafka.model.common.template.PodTemplateBuilder;
+import io.strimzi.api.kafka.model.common.template.ResourceTemplateBuilder;
+import io.strimzi.api.kafka.model.kafka.PersistentClaimStorageBuilder;
+import io.strimzi.api.kafka.model.kafka.Storage;
+import io.strimzi.api.kafka.model.podset.StrimziPodSet;
+import io.strimzi.api.kafka.model.podset.StrimziPodSetBuilder;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import org.junit.jupiter.api.Test;
@@ -120,6 +125,20 @@ public class WorkloadUtilsTest {
             .withIp("127.0.0.1")
             .withHostnames("home")
             .build();
+    private static final DnsPolicy DEFAULT_DNS_POLICY = DnsPolicy.NONE;
+    private static final PodDNSConfig DEFAULT_DNS_CONFIG = new PodDNSConfigBuilder()
+            .withNameservers("192.0.2.1")
+            .withSearches("ns1.svc.cluster-domain.example", "my.dns.search.suffix")
+            .withOptions(
+                new PodDNSConfigOptionBuilder()
+                        .withName("ndots")
+                        .withValue("2")
+                        .build(), 
+                new PodDNSConfigOptionBuilder()
+                        .withName("edns0")
+                        .build()
+            )
+            .build();
 
     //////////////////////////////////////////////////
     // Deployment tests
@@ -135,7 +154,7 @@ public class WorkloadUtilsTest {
                 null,
                 REPLICAS,
                 Map.of("extra", "annotations"),
-                WorkloadUtils.deploymentStrategy(io.strimzi.api.kafka.model.template.DeploymentStrategy.RECREATE),
+                WorkloadUtils.deploymentStrategy(io.strimzi.api.kafka.model.common.template.DeploymentStrategy.RECREATE),
                 DUMMY_POD_TEMPLATE_SPEC
         );
 
@@ -169,7 +188,7 @@ public class WorkloadUtilsTest {
                         .build(),
                 REPLICAS,
                 Map.of("extra", "annotations"),
-                WorkloadUtils.deploymentStrategy(io.strimzi.api.kafka.model.template.DeploymentStrategy.ROLLING_UPDATE),
+                WorkloadUtils.deploymentStrategy(io.strimzi.api.kafka.model.common.template.DeploymentStrategy.ROLLING_UPDATE),
                 DUMMY_POD_TEMPLATE_SPEC
         );
 
@@ -363,6 +382,44 @@ public class WorkloadUtilsTest {
         assertThat(sps.getSpec().getPods().stream().map(pod -> PodSetUtils.mapToPod(pod).getMetadata().getName()).toList(), hasItems("my-cluster-nodes-10", "my-cluster-nodes-11", "my-cluster-nodes-12"));
     }
 
+    @Test
+    public void testPatchPodAnnotations() {
+        Map<String, String> annotations = Map.of("anno-1", "value-1", "anno-2", "value-2", "anno-3", "value-3");
+        List<Pod> pods = new ArrayList<>();
+        pods.add(new PodBuilder()
+                .withNewMetadata()
+                    .withName("pod-0")
+                    .withNamespace(NAMESPACE)
+                    .withAnnotations(annotations)
+                .endMetadata()
+                .build()
+        );
+        pods.add(new PodBuilder()
+                .withNewMetadata()
+                    .withName("pod-1")
+                    .withNamespace(NAMESPACE)
+                    .withAnnotations(annotations)
+                .endMetadata()
+                .build()
+        );
+
+        StrimziPodSet sps = new StrimziPodSetBuilder()
+                .withNewMetadata()
+                    .withName("my-sps")
+                    .withNamespace(NAMESPACE)
+                .endMetadata()
+                .withNewSpec()
+                    .withPods(PodSetUtils.podsToMaps(pods))
+                .endSpec()
+                .build();
+
+        List<Pod> resultPods = PodSetUtils.podSetToPods(WorkloadUtils.patchAnnotations(sps, Map.of("anno-2", "value-2a", "anno-4", "value-4")));
+        assertThat(resultPods.size(), is(2));
+        Map<String, String> expectedAnnotations = Map.of("anno-1", "value-1", "anno-2", "value-2a", "anno-3", "value-3", "anno-4", "value-4");
+        assertThat(resultPods.get(0).getMetadata().getAnnotations(), is(expectedAnnotations));
+        assertThat(resultPods.get(1).getMetadata().getAnnotations(), is(expectedAnnotations));
+    }
+
     //////////////////////////////////////////////////
     // Stateful Pod tests
     //////////////////////////////////////////////////
@@ -393,9 +450,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getMetadata().getLabels(), is(LABELS
                 .withStrimziPodSetController(NAME)
                 .withStrimziPodName(NAME + "-0")
-                .withAdditionalLabels(Map.of("statefulset.kubernetes.io/pod-name", "my-workload-0"))
                 .toMap()));
-        assertThat(pod.getMetadata().getAnnotations(), is(Map.of(PodRevision.STRIMZI_REVISION_ANNOTATION, "6a6a679b")));
+        assertThat(pod.getMetadata().getAnnotations(), is(Map.of(PodRevision.STRIMZI_REVISION_ANNOTATION, "eaf3698c")));
 
         assertThat(pod.getSpec().getRestartPolicy(), is("Always"));
         assertThat(pod.getSpec().getHostname(), is(NAME + "-0"));
@@ -413,6 +469,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is(nullValue()));
         assertThat(pod.getSpec().getSchedulerName(), is("default-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsPolicy(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(nullValue()));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(nullValue()));
     }
 
@@ -442,9 +500,9 @@ public class WorkloadUtilsTest {
         assertThat(pod.getMetadata().getLabels(), is(LABELS
                 .withStrimziPodSetController(NAME)
                 .withStrimziPodName(NAME + "-0")
-                .withAdditionalLabels(Map.of("statefulset.kubernetes.io/pod-name", "my-workload-0", "default-label", "default-value"))
+                .withAdditionalLabels(Map.of("default-label", "default-value"))
                 .toMap()));
-        assertThat(pod.getMetadata().getAnnotations(), is(Map.of("extra", "annotations", PodRevision.STRIMZI_REVISION_ANNOTATION, "da09ff49")));
+        assertThat(pod.getMetadata().getAnnotations(), is(Map.of("extra", "annotations", PodRevision.STRIMZI_REVISION_ANNOTATION, "65a2d237")));
 
         assertThat(pod.getSpec().getRestartPolicy(), is("Always"));
         assertThat(pod.getSpec().getHostname(), is(NAME + "-0"));
@@ -463,6 +521,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is(nullValue()));
         assertThat(pod.getSpec().getSchedulerName(), is("default-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsPolicy(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(nullValue()));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(nullValue()));
     }
 
@@ -492,9 +552,9 @@ public class WorkloadUtilsTest {
         assertThat(pod.getMetadata().getLabels(), is(LABELS
                 .withStrimziPodSetController(NAME)
                 .withStrimziPodName(NAME + "-0")
-                .withAdditionalLabels(Map.of("statefulset.kubernetes.io/pod-name", "my-workload-0", "default-label", "default-value"))
+                .withAdditionalLabels(Map.of("default-label", "default-value"))
                 .toMap()));
-        assertThat(pod.getMetadata().getAnnotations(), is(Map.of("extra", "annotations", PodRevision.STRIMZI_REVISION_ANNOTATION, "da09ff49")));
+        assertThat(pod.getMetadata().getAnnotations(), is(Map.of("extra", "annotations", PodRevision.STRIMZI_REVISION_ANNOTATION, "65a2d237")));
 
         assertThat(pod.getSpec().getRestartPolicy(), is("Always"));
         assertThat(pod.getSpec().getHostname(), is(NAME + "-0"));
@@ -513,6 +573,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is(nullValue()));
         assertThat(pod.getSpec().getSchedulerName(), is("default-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsPolicy(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(nullValue()));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(nullValue()));
     }
 
@@ -535,6 +597,8 @@ public class WorkloadUtilsTest {
                         .withImagePullSecrets(List.of(new LocalObjectReference("some-other-pull-secret")))
                         .withPriorityClassName("my-priority-class")
                         .withHostAliases(DEFAULT_HOST_ALIAS)
+                        .withDnsPolicy(DEFAULT_DNS_POLICY)
+                        .withDnsConfig(DEFAULT_DNS_CONFIG)
                         .withTolerations(DEFAULT_TOLERATION)
                         .withTerminationGracePeriodSeconds(15)
                         .withSecurityContext(new PodSecurityContextBuilder().withRunAsUser(0L).build()) // => should be ignored
@@ -557,9 +621,9 @@ public class WorkloadUtilsTest {
         assertThat(pod.getMetadata().getLabels(), is(LABELS
                 .withStrimziPodSetController(NAME)
                 .withStrimziPodName(NAME + "-0")
-                .withAdditionalLabels(Map.of("statefulset.kubernetes.io/pod-name", "my-workload-0", "default-label", "default-value", "label-3", "value-3", "label-4", "value-4"))
+                .withAdditionalLabels(Map.of("default-label", "default-value", "label-3", "value-3", "label-4", "value-4"))
                 .toMap()));
-        assertThat(pod.getMetadata().getAnnotations(), is(Map.of("extra", "annotations", "anno-1", "value-1", "anno-2", "value-2", PodRevision.STRIMZI_REVISION_ANNOTATION, "4c2e5618")));
+        assertThat(pod.getMetadata().getAnnotations(), is(Map.of("extra", "annotations", "anno-1", "value-1", "anno-2", "value-2", PodRevision.STRIMZI_REVISION_ANNOTATION, "6458a317")));
 
         assertThat(pod.getSpec().getRestartPolicy(), is("Always"));
         assertThat(pod.getSpec().getHostname(), is(NAME + "-0"));
@@ -578,6 +642,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is("my-priority-class"));
         assertThat(pod.getSpec().getSchedulerName(), is("my-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(List.of(DEFAULT_HOST_ALIAS)));
+        assertThat(pod.getSpec().getDnsPolicy(), is(DEFAULT_DNS_POLICY.toValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(DEFAULT_DNS_CONFIG));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(List.of(DEFAULT_TOPOLOGY_SPREAD_CONSTRAINT)));
     }
 
@@ -618,6 +684,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is(nullValue()));
         assertThat(pod.getSpec().getSchedulerName(), is("default-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsPolicy(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(nullValue()));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(nullValue()));
     }
 
@@ -655,6 +723,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is(nullValue()));
         assertThat(pod.getSpec().getSchedulerName(), is("default-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsPolicy(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(nullValue()));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(nullValue()));
     }
 
@@ -692,6 +762,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is(nullValue()));
         assertThat(pod.getSpec().getSchedulerName(), is("default-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsPolicy(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(nullValue()));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(nullValue()));
     }
 
@@ -710,6 +782,8 @@ public class WorkloadUtilsTest {
                         .withImagePullSecrets(List.of(new LocalObjectReference("some-other-pull-secret")))
                         .withPriorityClassName("my-priority-class")
                         .withHostAliases(DEFAULT_HOST_ALIAS)
+                        .withDnsPolicy(DEFAULT_DNS_POLICY)
+                        .withDnsConfig(DEFAULT_DNS_CONFIG)
                         .withTolerations(DEFAULT_TOLERATION)
                         .withTerminationGracePeriodSeconds(15)
                         .withSecurityContext(new PodSecurityContextBuilder().withRunAsUser(0L).build()) // => should be ignored
@@ -744,6 +818,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is("my-priority-class"));
         assertThat(pod.getSpec().getSchedulerName(), is("my-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(List.of(DEFAULT_HOST_ALIAS)));
+        assertThat(pod.getSpec().getDnsPolicy(), is(DEFAULT_DNS_POLICY.toValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(DEFAULT_DNS_CONFIG));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(List.of(DEFAULT_TOPOLOGY_SPREAD_CONSTRAINT)));
     }
 
@@ -789,6 +865,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is(nullValue()));
         assertThat(pod.getSpec().getSchedulerName(), is("default-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsPolicy(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(nullValue()));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(nullValue()));
     }
 
@@ -831,6 +909,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is(nullValue()));
         assertThat(pod.getSpec().getSchedulerName(), is("default-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsPolicy(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(nullValue()));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(nullValue()));
     }
 
@@ -873,6 +953,8 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is(nullValue()));
         assertThat(pod.getSpec().getSchedulerName(), is("default-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsPolicy(), is(nullValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(nullValue()));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(nullValue()));
     }
 
@@ -893,6 +975,8 @@ public class WorkloadUtilsTest {
                         .withImagePullSecrets(List.of(new LocalObjectReference("some-other-pull-secret")))
                         .withPriorityClassName("my-priority-class")
                         .withHostAliases(DEFAULT_HOST_ALIAS)
+                        .withDnsPolicy(DEFAULT_DNS_POLICY)
+                        .withDnsConfig(DEFAULT_DNS_CONFIG)
                         .withTolerations(DEFAULT_TOLERATION)
                         .withTerminationGracePeriodSeconds(15)
                         .withSecurityContext(new PodSecurityContextBuilder().withRunAsUser(0L).build()) // => should be ignored
@@ -930,27 +1014,14 @@ public class WorkloadUtilsTest {
         assertThat(pod.getSpec().getPriorityClassName(), is("my-priority-class"));
         assertThat(pod.getSpec().getSchedulerName(), is("my-scheduler"));
         assertThat(pod.getSpec().getHostAliases(), is(List.of(DEFAULT_HOST_ALIAS)));
+        assertThat(pod.getSpec().getDnsPolicy(), is(DEFAULT_DNS_POLICY.toValue()));
+        assertThat(pod.getSpec().getDnsConfig(), is(DEFAULT_DNS_CONFIG));
         assertThat(pod.getSpec().getTopologySpreadConstraints(), is(List.of(DEFAULT_TOPOLOGY_SPREAD_CONSTRAINT)));
     }
 
     //////////////////////////////////////////////////
     // Helper methods tests
     //////////////////////////////////////////////////
-
-    @Test
-    public void testRemoveEmptyValuesFromTolerations() {
-        Toleration t1 = new TolerationBuilder()
-                .withValue("")
-                .withEffect("NoExecute")
-                .build();
-
-        Toleration t2 = new TolerationBuilder()
-                .withValue(null)
-                .withEffect("NoExecute")
-                .build();
-
-        assertThat(WorkloadUtils.removeEmptyValuesFromTolerations(List.of(t1)), is(WorkloadUtils.removeEmptyValuesFromTolerations(List.of(t2))));
-    }
 
     @Test
     public void testImagePullSecrets()  {
@@ -964,7 +1035,7 @@ public class WorkloadUtilsTest {
 
     @Test
     public void testDeploymentStrategyRecreate()    {
-        DeploymentStrategy strategy = WorkloadUtils.deploymentStrategy(io.strimzi.api.kafka.model.template.DeploymentStrategy.RECREATE);
+        DeploymentStrategy strategy = WorkloadUtils.deploymentStrategy(io.strimzi.api.kafka.model.common.template.DeploymentStrategy.RECREATE);
 
         assertThat(strategy.getType(), is("Recreate"));
         assertThat(strategy.getRollingUpdate(), is(nullValue()));
@@ -972,7 +1043,7 @@ public class WorkloadUtilsTest {
 
     @Test
     public void testDeploymentStrategyRollingUpdate()    {
-        DeploymentStrategy strategy = WorkloadUtils.deploymentStrategy(io.strimzi.api.kafka.model.template.DeploymentStrategy.ROLLING_UPDATE);
+        DeploymentStrategy strategy = WorkloadUtils.deploymentStrategy(io.strimzi.api.kafka.model.common.template.DeploymentStrategy.ROLLING_UPDATE);
 
         assertThat(strategy.getType(), is("RollingUpdate"));
         assertThat(strategy.getRollingUpdate().getMaxSurge(), is(new IntOrString(1)));

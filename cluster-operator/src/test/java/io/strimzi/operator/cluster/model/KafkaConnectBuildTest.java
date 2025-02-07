@@ -8,12 +8,18 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
+import io.fabric8.kubernetes.api.model.SecretVolumeSource;
+import io.fabric8.kubernetes.api.model.SecretVolumeSourceBuilder;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
+import io.fabric8.kubernetes.api.model.VolumeMount;
+import io.fabric8.kubernetes.api.model.VolumeMountBuilder;
 import io.fabric8.openshift.api.model.BuildConfig;
-import io.strimzi.api.kafka.model.ContainerEnvVarBuilder;
-import io.strimzi.api.kafka.model.KafkaConnect;
-import io.strimzi.api.kafka.model.KafkaConnectBuilder;
-import io.strimzi.api.kafka.model.KafkaConnectResources;
+import io.strimzi.api.kafka.model.common.template.AdditionalVolume;
+import io.strimzi.api.kafka.model.common.template.AdditionalVolumeBuilder;
+import io.strimzi.api.kafka.model.common.template.ContainerEnvVarBuilder;
+import io.strimzi.api.kafka.model.connect.KafkaConnect;
+import io.strimzi.api.kafka.model.connect.KafkaConnectBuilder;
+import io.strimzi.api.kafka.model.connect.KafkaConnectResources;
 import io.strimzi.api.kafka.model.connect.build.Artifact;
 import io.strimzi.api.kafka.model.connect.build.JarArtifactBuilder;
 import io.strimzi.api.kafka.model.connect.build.PluginBuilder;
@@ -191,7 +197,7 @@ public class KafkaConnectBuildTest {
         assertThat(pod.getMetadata().getName(), is(KafkaConnectResources.buildPodName(cluster)));
         assertThat(pod.getMetadata().getNamespace(), is(namespace));
 
-        Map<String, String> expectedDeploymentLabels = TestUtils.map(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
+        Map<String, String> expectedDeploymentLabels = Map.of(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
                 Labels.STRIMZI_NAME_LABEL, KafkaConnectResources.buildPodName(cluster),
                 Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND,
                 Labels.STRIMZI_COMPONENT_TYPE_LABEL, KafkaConnectBuild.COMPONENT_TYPE,
@@ -319,7 +325,7 @@ public class KafkaConnectBuildTest {
         assertThat(bc.getMetadata().getName(), is(KafkaConnectResources.buildConfigName(cluster)));
         assertThat(bc.getMetadata().getNamespace(), is(namespace));
 
-        Map<String, String> expectedDeploymentLabels = TestUtils.map(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
+        Map<String, String> expectedDeploymentLabels = Map.of(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
                 Labels.STRIMZI_NAME_LABEL, KafkaConnectResources.buildPodName(cluster),
                 Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND,
                 Labels.STRIMZI_COMPONENT_TYPE_LABEL, KafkaConnectBuild.COMPONENT_TYPE,
@@ -401,7 +407,7 @@ public class KafkaConnectBuildTest {
         assertThat(bc.getMetadata().getName(), is(KafkaConnectResources.buildConfigName(cluster)));
         assertThat(bc.getMetadata().getNamespace(), is(namespace));
 
-        Map<String, String> expectedDeploymentLabels = TestUtils.map(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
+        Map<String, String> expectedDeploymentLabels = Map.of(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
                 Labels.STRIMZI_NAME_LABEL, KafkaConnectResources.buildPodName(cluster),
                 Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND,
                 Labels.STRIMZI_COMPONENT_TYPE_LABEL, KafkaConnectBuild.COMPONENT_TYPE,
@@ -419,14 +425,29 @@ public class KafkaConnectBuildTest {
 
     @ParallelTest
     public void testTemplate()   {
-        Map<String, String> buildPodLabels = TestUtils.map("l1", "v1", "l2", "v2");
-        Map<String, String> buildPodAnnos = TestUtils.map("a1", "v1", "a2", "v2");
+        Map<String, String> buildPodLabels = Map.of("l1", "v1", "l2", "v2");
+        Map<String, String> buildPodAnnos = Map.of("a1", "v1", "a2", "v2");
 
-        Map<String, String> buildConfigLabels = TestUtils.map("l3", "v3", "l4", "v4");
-        Map<String, String> buildConfigAnnos = TestUtils.map("a3", "v3", "a4", "v4");
+        Map<String, String> buildConfigLabels = Map.of("l3", "v3", "l4", "v4");
+        Map<String, String> buildConfigAnnos = Map.of("a3", "v3", "a4", "v4");
 
-        Map<String, String> saLabels = TestUtils.map("l5", "v5", "l6", "v6");
-        Map<String, String> saAnots = TestUtils.map("a5", "v5", "a6", "v6");
+        Map<String, String> saLabels = Map.of("l5", "v5", "l6", "v6");
+        Map<String, String> saAnots = Map.of("a5", "v5", "a6", "v6");
+
+        SecretVolumeSource secret = new SecretVolumeSourceBuilder()
+                .withSecretName("secret1")
+                .build();
+        
+        AdditionalVolume additionalVolume  = new AdditionalVolumeBuilder()
+                .withName("secret-volume-name")
+                .withSecret(secret)
+                .build();
+        
+        VolumeMount additionalVolumeMount = new VolumeMountBuilder()
+                .withName("secret-volume-name")
+                .withMountPath("/mnt/secret-volume")
+                .withSubPath("def")
+                .build();
 
         KafkaConnect kc = new KafkaConnectBuilder()
                 .withNewMetadata()
@@ -452,9 +473,11 @@ public class KafkaConnectBuildTest {
                             .withPriorityClassName("top-priority")
                             .withSchedulerName("my-scheduler")
                             .withEnableServiceLinks(false)
+                            .withVolumes(additionalVolume)
                         .endBuildPod()
                         .withNewBuildContainer()
                             .withEnv(new ContainerEnvVarBuilder().withName("TEST_ENV_VAR").withValue("testValue").build())
+                            .withVolumeMounts(additionalVolumeMount)
                         .endBuildContainer()
                         .withNewBuildConfig()
                             .withNewMetadata()
@@ -482,6 +505,8 @@ public class KafkaConnectBuildTest {
         assertThat(pod.getSpec().getSchedulerName(), is("my-scheduler"));
         assertThat(pod.getSpec().getEnableServiceLinks(), is(false));
         assertThat(pod.getSpec().getContainers().get(0).getEnv().stream().filter(env -> "TEST_ENV_VAR".equals(env.getName())).findFirst().orElseThrow().getValue(), is("testValue"));
+        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().stream().filter(volumeMount -> "secret-volume-name".equals(volumeMount.getName())).iterator().next(), is(additionalVolumeMount));
+        assertThat(pod.getSpec().getVolumes().stream().filter(volume -> "secret-volume-name".equals(volume.getName())).iterator().next().getSecret(), is(secret));
 
         KafkaConnectDockerfile dockerfile = new KafkaConnectDockerfile("my-image:latest", kc.getSpec().getBuild(), SHARED_ENV_PROVIDER);
         BuildConfig bc = build.generateBuildConfig(dockerfile);

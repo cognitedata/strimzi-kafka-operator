@@ -15,6 +15,7 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static java.lang.Boolean.parseBoolean;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static java.util.Collections.unmodifiableMap;
@@ -99,11 +100,6 @@ public class Labels extends ResourceLabels {
     public static final String KUBERNETES_MANAGED_BY_LABEL = KUBERNETES_DOMAIN + "managed-by";
 
     /**
-     * Used to identify individual pods
-     */
-    public static final String KUBERNETES_STATEFULSET_POD_LABEL = "statefulset.kubernetes.io/pod-name";
-
-    /**
      * Used to exclude parent CR's labels from being assigned to provisioned subresources
      */
     public static final Pattern STRIMZI_LABELS_EXCLUSION_PATTERN = Pattern.compile(System.getenv()
@@ -162,10 +158,10 @@ public class Labels extends ResourceLabels {
 
         if (additionalLabels != null) {
             additionalLabels = additionalLabels
-                    .entrySet()
-                    .stream()
-                    .filter(entryset -> !STRIMZI_LABELS_EXCLUSION_PATTERN.matcher(entryset.getKey()).matches())
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                .entrySet()
+                .stream()
+                .filter(entryset -> !STRIMZI_LABELS_EXCLUSION_PATTERN.matcher(entryset.getKey()).matches())
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         }
 
         return additionalLabels(additionalLabels);
@@ -351,16 +347,6 @@ public class Labels extends ResourceLabels {
     }
 
     /**
-     * The same labels as this instance, but with the given {@code name} for the {@code statefulset.kubernetes.io/pod-name} key.
-     *
-     * @param name The pod name to add
-     * @return A new instance with the given pod name added.
-     */
-    public Labels withStatefulSetPod(String name) {
-        return with(KUBERNETES_STATEFULSET_POD_LABEL, name);
-    }
-
-    /**
      * Sets the Strimzi controller label to strimzipodset
      *
      * @param controllerName Name of the controlling StrimziPodSet
@@ -473,7 +459,6 @@ public class Labels extends ResourceLabels {
     }
 
     /**
-     *
      * When adding new labels, ensure the names of any resources are truncated for sanitization purposes to be compatible with Kubernetes
      * Note: Valid label values must be a maximum length of 63 characters
      * https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set
@@ -481,7 +466,7 @@ public class Labels extends ResourceLabels {
      * @param resource              Kubernetes resource with metadata. It is used to get the resource name as well as copy
      *                              its labels. This is typically a custom resource which owns the whole deployment.
      * @param strimziComponentName  Name of the component used for the strimzi.io/name label
-     * @param strimziComponentType  Type of the component (e.g. kafka, zookeeper, etc.) used for the strimzi.io/component-type label
+     * @param strimziComponentType  Type of the component (e.g. kafka, etc.) used for the strimzi.io/component-type label
      * @param managedBy             Name of the component managing this resource (e.g. strimzi-cluster-operator)
      *
      * @return  The default set of labels used for the Kubernetes resources
@@ -500,5 +485,29 @@ public class Labels extends ResourceLabels {
                 .withKubernetesInstance(customResourceName)
                 .withKubernetesPartOf(customResourceName)
                 .withKubernetesManagedBy(managedBy);
+    }
+
+    /*
+     * Static methods for working with Labels
+     */
+
+    /**
+     * Gets a boolean value of an label from a Kubernetes resource
+     *
+     * @param resource      Resource from which the label should be extracted
+     * @param label         Label key for which we want the value
+     * @param defaultValue  Default value if the label is not present or the resource doesn't exist / doesn't have labels
+     *
+     * @return  Boolean value form the labels or the default value
+     */
+    public static boolean booleanLabel(HasMetadata resource, String label, boolean defaultValue) {
+        if (resource != null
+                && resource.getMetadata() != null
+                && resource.getMetadata().getLabels() != null)  {
+            String value = resource.getMetadata().getLabels().get(label);
+            return value != null ? parseBoolean(value) : defaultValue;
+        } else {
+            return defaultValue;
+        }
     }
 }

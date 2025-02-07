@@ -8,11 +8,11 @@ import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.Crds;
-import io.strimzi.api.kafka.KafkaConnectorList;
-import io.strimzi.api.kafka.model.KafkaConnector;
+import io.strimzi.api.kafka.model.connector.KafkaConnector;
+import io.strimzi.api.kafka.model.connector.KafkaConnectorList;
+import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.ResourceType;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaConnectorUtils;
-import io.strimzi.systemtest.resources.ResourceManager;
 
 import java.util.function.Consumer;
 
@@ -53,7 +53,7 @@ public class KafkaConnectorResource implements ResourceType<KafkaConnector> {
         return Crds.kafkaConnectorOperation(ResourceManager.kubeClient().getClient());
     }
 
-    public static void replaceKafkaConnectorResourceInSpecificNamespace(String resourceName, Consumer<KafkaConnector> editor, String namespaceName) {
-        ResourceManager.replaceCrdResource(KafkaConnector.class, KafkaConnectorList.class, resourceName, editor, namespaceName);
+    public static void replaceKafkaConnectorResourceInSpecificNamespace(String namespaceName, String resourceName, Consumer<KafkaConnector> editor) {
+        ResourceManager.replaceCrdResource(namespaceName, KafkaConnector.class, KafkaConnectorList.class, resourceName, editor);
     }
 }

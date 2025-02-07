@@ -11,53 +11,80 @@ import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder;
 import io.fabric8.kubernetes.api.model.rbac.RoleBuilder;
 import io.fabric8.kubernetes.api.model.rbac.RoleRefBuilder;
 import io.fabric8.kubernetes.api.model.rbac.SubjectBuilder;
-import io.strimzi.api.kafka.model.KafkaConnect;
-import io.strimzi.api.kafka.model.KafkaResources;
+import io.skodjob.annotations.Desc;
+import io.skodjob.annotations.Label;
+import io.skodjob.annotations.Step;
+import io.skodjob.annotations.SuiteDoc;
+import io.skodjob.annotations.TestDoc;
+import io.strimzi.api.kafka.model.connect.KafkaConnect;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.systemtest.AbstractST;
-import io.strimzi.systemtest.Environment;
 import io.strimzi.systemtest.annotations.ParallelNamespaceTest;
+import io.strimzi.systemtest.docs.TestDocsLabels;
 import io.strimzi.systemtest.kafkaclients.internalClients.KafkaClients;
-import io.strimzi.systemtest.kafkaclients.internalClients.KafkaClientsBuilder;
 import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.storage.TestStorage;
 import io.strimzi.systemtest.templates.crd.KafkaConnectTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaConnectorTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaNodePoolTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.utils.ClientUtils;
-import io.strimzi.systemtest.utils.StUtils;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaConnectUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.util.HashMap;
 import java.util.Map;
 
-import static io.strimzi.systemtest.Constants.REGRESSION;
+import static io.strimzi.systemtest.TestTags.REGRESSION;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 
 @Tag(REGRESSION)
+@SuiteDoc(
+    description = @Desc("This test suite verifies KafkaConnect using ConfigMap and EnvVar configuration."),
+    beforeTestSteps = {
+        @Step(value = "Deploy Cluster Operator across all namespaces, with custom configuration.", expected = "Cluster Operator is deployed.")
+    },
+    labels = {
+        @Label(value = TestDocsLabels.KAFKA)
+    }
+)
 public class ConfigProviderST extends AbstractST {
 
     private static final Logger LOGGER = LogManager.getLogger(ConfigProviderST.class);
 
     @ParallelNamespaceTest
-    void testConnectWithConnectorUsingConfigAndEnvProvider(ExtensionContext extensionContext) {
-        final TestStorage testStorage = storageMap.get(extensionContext);
-        final String clusterName = testStorage.getClusterName();
-        final String topicName = testStorage.getTopicName();
-        final String namespaceName = StUtils.getNamespaceBasedOnRbac(Environment.TEST_SUITE_NAMESPACE, extensionContext);
-        final String producerName = "producer-" + ClientUtils.generateRandomConsumerGroup();
+    @TestDoc(
+        description = @Desc("Test to ensure Kafka Connect functions correctly using ConfigMap and EnvVar configuration."),
+        steps = {
+            @Step(value = "Create broker and controller KafkaNodePools.", expected = "Resources are created and are in ready state."),
+            @Step(value = "Create Kafka cluster.", expected = "Kafka cluster is ready"),
+            @Step(value = "Create ConfigMap for connector configuration.", expected = "ConfigMap with connector configuration is created."),
+            @Step(value = "Deploy Kafka Connect with external configuration from ConfigMap.", expected = "KafkaConnect is deployed with proper configuration."),
+            @Step(value = "Create necessary Role and RoleBinding for connector.", expected = "Role and RoleBinding are created and applied."),
+            @Step(value = "Deploy KafkaConnector.", expected = "KafkaConnector is successfully deployed."),
+            @Step(value = "Deploy Kafka clients.", expected = "Kafka clients are deployed and ready."),
+            @Step(value = "Send messages and verify they are written to sink file.", expected = "Messages are successfully written to the specified sink file.")
+        },
+        labels = {
+            @Label(value = TestDocsLabels.KAFKA)
+        }
+    )
+    void testConnectWithConnectorUsingConfigAndEnvProvider() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
         final String customFileSinkPath = "/tmp/my-own-path.txt";
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 3).build());
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3).build());
 
         Map<String, String> configData = new HashMap<>();
-        configData.put("topics", topicName);
+        configData.put("topics", testStorage.getTopicName());
         configData.put("file", customFileSinkPath);
         configData.put("key", "org.apache.kafka.connect.storage.StringConverter");
         configData.put("value", "org.apache.kafka.connect.storage.StringConverter");
@@ -72,9 +99,9 @@ public class ConfigProviderST extends AbstractST {
             .withData(configData)
             .build();
 
-        kubeClient().getClient().configMaps().inNamespace(namespaceName).resource(connectorConfig).create();
+        kubeClient().getClient().configMaps().inNamespace(testStorage.getNamespaceName()).resource(connectorConfig).create();
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaConnectTemplates.kafkaConnectWithFilePlugin(clusterName, namespaceName, 1)
+        resourceManager.createResourceWithWait(KafkaConnectTemplates.kafkaConnectWithFilePlugin(testStorage.getNamespaceName(), testStorage.getClusterName(), 1)
             .editOrNewMetadata()
                 .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
             .endMetadata()
@@ -88,28 +115,38 @@ public class ConfigProviderST extends AbstractST {
                 .addToConfig("config.providers.env.class", "org.apache.kafka.common.config.provider.EnvVarConfigProvider")
                 .editOrNewExternalConfiguration()
                     .addNewEnv()
-                .withName("FILE_SINK_FILE")
-                .withNewValueFrom()
-                    .withNewConfigMapKeyRef("file", cmName, false)
-                .endValueFrom()
+                        .withName("FILE_SINK_FILE")
+                        .withNewValueFrom()
+                            .withNewConfigMapKeyRef("file", cmName, false)
+                        .endValueFrom()
                     .endEnv()
                 .endExternalConfiguration()
+                .editOrNewTemplate()
+                    .editOrNewConnectContainer()
+                        .addNewEnv()
+                            .withName("FILE_SINK_TOPICS")
+                            .withNewValueFrom()
+                                .withNewConfigMapKeyRef("topics", cmName, false)
+                            .endValueFrom()
+                        .endEnv()
+                    .endConnectContainer()
+                .endTemplate()
             .endSpec()
             .build());
 
         LOGGER.info("Creating needed RoleBinding and Role for Kubernetes Config Provider");
 
-        ResourceManager.getInstance().createResourceWithWait(extensionContext,
+        ResourceManager.getInstance().createResourceWithWait(
             new RoleBindingBuilder()
                 .editOrNewMetadata()
                     .withName("connector-config-rb")
-                    .withNamespace(namespaceName)
+                    .withNamespace(testStorage.getNamespaceName())
                 .endMetadata()
                 .withSubjects(
                     new SubjectBuilder()
                         .withKind("ServiceAccount")
-                        .withName(clusterName + "-connect")
-                        .withNamespace(namespaceName)
+                        .withName(testStorage.getClusterName() + "-connect")
+                        .withNamespace(testStorage.getNamespaceName())
                         .build()
                 )
                 .withRoleRef(
@@ -124,7 +161,7 @@ public class ConfigProviderST extends AbstractST {
         Role configRole = new RoleBuilder()
             .editOrNewMetadata()
                 .withName(configRoleName)
-                .withNamespace(namespaceName)
+                .withNamespace(testStorage.getNamespaceName())
             .endMetadata()
             .addNewRule()
                 .withApiGroups("")
@@ -134,39 +171,31 @@ public class ConfigProviderST extends AbstractST {
             .endRule()
             .build();
 
-        kubeClient().createOrUpdateRole(configRole);
+        kubeClient().namespace(testStorage.getNamespaceName()).createOrUpdateRole(configRole);
 
-        String configPrefix = "configmaps:" + namespaceName + "/connector-config:";
+        String configPrefix = "configmaps:" + testStorage.getNamespaceName() + "/connector-config:";
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaConnectorTemplates.kafkaConnector(clusterName)
+        resourceManager.createResourceWithWait(KafkaConnectorTemplates.kafkaConnector(testStorage.getNamespaceName(), testStorage.getClusterName())
             .editSpec()
                 .withClassName("org.apache.kafka.connect.file.FileStreamSinkConnector")
                 .addToConfig("file", "${env:FILE_SINK_FILE}")
                 .addToConfig("key.converter", "${" + configPrefix + "key}")
                 .addToConfig("value.converter", "${" + configPrefix + "value}")
-                .addToConfig("topics", "${" + configPrefix + "topics}")
+                .addToConfig("topics", "${env:FILE_SINK_TOPICS}")
             .endSpec()
             .build());
 
-        KafkaClients kafkaBasicClientJob = new KafkaClientsBuilder()
-            .withProducerName(producerName)
-            .withBootstrapAddress(KafkaResources.plainBootstrapAddress(clusterName))
-            .withTopicName(topicName)
-            .withMessageCount(MESSAGE_COUNT)
-            .withDelayMs(0)
-            .withNamespaceName(namespaceName)
-            .build();
+        final KafkaClients kafkaBasicClientJob = ClientUtils.getInstantPlainClients(testStorage);
+        resourceManager.createResourceWithWait(kafkaBasicClientJob.producerStrimzi());
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaBasicClientJob.producerStrimzi());
-
-        String kafkaConnectPodName = kubeClient().listPods(namespaceName, clusterName, Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND).get(0).getMetadata().getName();
-        KafkaConnectUtils.waitForMessagesInKafkaConnectFileSink(namespaceName, kafkaConnectPodName, customFileSinkPath, "Hello-world - 99");
+        String kafkaConnectPodName = kubeClient().listPods(testStorage.getNamespaceName(), testStorage.getClusterName(), Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND).get(0).getMetadata().getName();
+        KafkaConnectUtils.waitForMessagesInKafkaConnectFileSink(testStorage.getNamespaceName(), kafkaConnectPodName, customFileSinkPath, testStorage.getMessageCount());
     }
 
     @BeforeAll
-    void setup(ExtensionContext extensionContext) {
+    void setup() {
         this.clusterOperator = this.clusterOperator
-                .defaultInstallation(extensionContext)
+                .defaultInstallation()
                 .createInstallation()
                 .runInstallation();
     }

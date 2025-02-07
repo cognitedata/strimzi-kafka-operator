@@ -11,48 +11,47 @@ import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
-import io.strimzi.api.kafka.model.AclOperation;
-import io.strimzi.api.kafka.model.CertificateAuthority;
-import io.strimzi.api.kafka.model.CertificateAuthorityBuilder;
-import io.strimzi.api.kafka.model.CruiseControlResources;
-import io.strimzi.api.kafka.model.KafkaConnect;
-import io.strimzi.api.kafka.model.KafkaConnectResources;
-import io.strimzi.api.kafka.model.KafkaExporterResources;
-import io.strimzi.api.kafka.model.KafkaMirrorMaker;
-import io.strimzi.api.kafka.model.KafkaResources;
-import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationTls;
-import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
-import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
+import io.strimzi.api.kafka.model.common.CertificateAuthority;
+import io.strimzi.api.kafka.model.common.CertificateAuthorityBuilder;
+import io.strimzi.api.kafka.model.connect.KafkaConnect;
+import io.strimzi.api.kafka.model.connect.KafkaConnectResources;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaResources;
+import io.strimzi.api.kafka.model.kafka.cruisecontrol.CruiseControlResources;
+import io.strimzi.api.kafka.model.kafka.exporter.KafkaExporterResources;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerAuthenticationTls;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
+import io.strimzi.api.kafka.model.user.acl.AclOperation;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.model.Ca;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.systemtest.AbstractST;
-import io.strimzi.systemtest.Constants;
-import io.strimzi.systemtest.Environment;
-import io.strimzi.systemtest.kafkaclients.externalClients.ExternalKafkaClient;
+import io.strimzi.systemtest.TestConstants;
 import io.strimzi.systemtest.annotations.ParallelNamespaceTest;
+import io.strimzi.systemtest.kafkaclients.externalClients.ExternalKafkaClient;
 import io.strimzi.systemtest.kafkaclients.internalClients.KafkaClients;
 import io.strimzi.systemtest.kafkaclients.internalClients.KafkaClientsBuilder;
+import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.crd.KafkaConnectResource;
-import io.strimzi.systemtest.resources.crd.KafkaMirrorMakerResource;
 import io.strimzi.systemtest.resources.crd.KafkaNodePoolResource;
 import io.strimzi.systemtest.resources.crd.KafkaResource;
 import io.strimzi.systemtest.storage.TestStorage;
 import io.strimzi.systemtest.templates.crd.KafkaConnectTemplates;
-import io.strimzi.systemtest.templates.crd.KafkaMirrorMakerTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaNodePoolTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTopicTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaUserTemplates;
 import io.strimzi.systemtest.utils.ClientUtils;
 import io.strimzi.systemtest.utils.RollingUpdateUtils;
-import io.strimzi.systemtest.utils.StUtils;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaConnectUtils;
-import io.strimzi.systemtest.utils.kafkaUtils.KafkaMirrorMakerUtils;
+import io.strimzi.systemtest.utils.kafkaUtils.KafkaNodePoolUtils;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaTopicUtils;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaUtils;
 import io.strimzi.systemtest.utils.kubeUtils.controllers.DeploymentUtils;
 import io.strimzi.systemtest.utils.kubeUtils.objects.PodUtils;
 import io.strimzi.systemtest.utils.kubeUtils.objects.SecretUtils;
+import io.strimzi.test.ReadWriteUtils;
 import io.strimzi.test.TestUtils;
 import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.errors.GroupAuthorizationException;
@@ -62,12 +61,10 @@ import org.apache.logging.log4j.Logger;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.io.InputStream;
 import java.security.cert.X509Certificate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
@@ -75,23 +72,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
-import static io.strimzi.api.kafka.model.KafkaResources.clientsCaCertificateSecretName;
-import static io.strimzi.api.kafka.model.KafkaResources.clientsCaKeySecretName;
-import static io.strimzi.api.kafka.model.KafkaResources.clusterCaCertificateSecretName;
-import static io.strimzi.api.kafka.model.KafkaResources.clusterCaKeySecretName;
-import static io.strimzi.systemtest.Constants.ACCEPTANCE;
-import static io.strimzi.systemtest.Constants.CONNECT;
-import static io.strimzi.systemtest.Constants.CONNECT_COMPONENTS;
-import static io.strimzi.systemtest.Constants.CRUISE_CONTROL;
-import static io.strimzi.systemtest.Constants.EXTERNAL_CLIENTS_USED;
-import static io.strimzi.systemtest.Constants.INTERNAL_CLIENTS_USED;
-import static io.strimzi.systemtest.Constants.MIRROR_MAKER;
-import static io.strimzi.systemtest.Constants.NODEPORT_SUPPORTED;
-import static io.strimzi.systemtest.Constants.REGRESSION;
-import static io.strimzi.systemtest.Constants.ROLLING_UPDATE;
-import static io.strimzi.systemtest.Constants.SANITY;
+import static io.strimzi.api.kafka.model.kafka.KafkaResources.clientsCaCertificateSecretName;
+import static io.strimzi.api.kafka.model.kafka.KafkaResources.clientsCaKeySecretName;
+import static io.strimzi.api.kafka.model.kafka.KafkaResources.clusterCaCertificateSecretName;
+import static io.strimzi.api.kafka.model.kafka.KafkaResources.clusterCaKeySecretName;
+import static io.strimzi.systemtest.TestTags.ACCEPTANCE;
+import static io.strimzi.systemtest.TestTags.CONNECT;
+import static io.strimzi.systemtest.TestTags.CONNECT_COMPONENTS;
+import static io.strimzi.systemtest.TestTags.CRUISE_CONTROL;
+import static io.strimzi.systemtest.TestTags.EXTERNAL_CLIENTS_USED;
+import static io.strimzi.systemtest.TestTags.NODEPORT_SUPPORTED;
+import static io.strimzi.systemtest.TestTags.REGRESSION;
+import static io.strimzi.systemtest.TestTags.ROLLING_UPDATE;
+import static io.strimzi.systemtest.TestTags.SANITY;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 import static java.util.Collections.singletonMap;
 import static org.hamcrest.CoreMatchers.is;
@@ -99,7 +93,6 @@ import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.sameInstance;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -107,76 +100,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class SecurityST extends AbstractST {
 
     private static final Logger LOGGER = LogManager.getLogger(SecurityST.class);
-    private static final String OPENSSL_RETURN_CODE = "Verify return code: 0 (ok)";
 
     @ParallelNamespaceTest
-    void testCertificates(ExtensionContext extensionContext) {
-        final TestStorage testStorage = storageMap.get(extensionContext);
-        final String namespaceName = StUtils.getNamespaceBasedOnRbac(Environment.TEST_SUITE_NAMESPACE, extensionContext);
-        final String clusterName = testStorage.getClusterName();
-
-        LOGGER.info("Running testCertificates {}", clusterName);
-
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 3).build());
-
-        LOGGER.info("Check Kafka bootstrap certificate");
-        String outputCertificate = SystemTestCertManager.generateOpenSslCommandByComponent(namespaceName, KafkaResources.tlsBootstrapAddress(clusterName), KafkaResources.bootstrapServiceName(clusterName),
-            KafkaResource.getKafkaPodName(clusterName, 0), "kafka", false);
-        LOGGER.info("OPENSSL OUTPUT: \n\n{}\n\n", outputCertificate);
-        verifyCerts(clusterName, outputCertificate, "kafka");
-
-        if (!Environment.isKRaftModeEnabled()) {
-            LOGGER.info("Check ZooKeeper client certificate");
-            outputCertificate = SystemTestCertManager.generateOpenSslCommandByComponent(namespaceName, KafkaResources.zookeeperServiceName(clusterName) + ":2181", KafkaResources.zookeeperServiceName(clusterName),
-                KafkaResource.getKafkaPodName(clusterName, 0), "kafka");
-            verifyCerts(clusterName, outputCertificate, "zookeeper");
-        }
-
-        List<String> kafkaPorts = new ArrayList<>(Arrays.asList("9091", "9093"));
-        List<String> zkPorts = new ArrayList<>(Arrays.asList("2181", "3888"));
-
-        IntStream.rangeClosed(0, 2).forEach(podId -> {
-            String output;
-
-            LOGGER.info("Checking certificates for podId {}", podId);
-            for (String kafkaPort : kafkaPorts) {
-                LOGGER.info("Check Kafka certificate for port {}", kafkaPort);
-                output = SystemTestCertManager.generateOpenSslCommandByComponentUsingSvcHostname(namespaceName, KafkaResource.getKafkaPodName(clusterName, podId),
-                        KafkaResources.brokersServiceName(clusterName), kafkaPort, "kafka");
-                verifyCerts(clusterName, output, "kafka");
-            }
-
-            if (!Environment.isKRaftModeEnabled()) {
-                for (String zkPort : zkPorts) {
-                    LOGGER.info("Check ZooKeeper certificate for port {}", zkPort);
-                    output = SystemTestCertManager.generateOpenSslCommandByComponentUsingSvcHostname(namespaceName, KafkaResources.zookeeperPodName(clusterName, podId),
-                            KafkaResources.zookeeperHeadlessServiceName(clusterName), zkPort, "zookeeper");
-                    verifyCerts(clusterName, output, "zookeeper");
-                }
-            }
-        });
-    }
-
-    // synchronized avoiding data-race (list of string is allocated on the heap), but has different reference on stack it's ok
-    // but Strings parameters provided are not created in scope of this method
-    synchronized private static void verifyCerts(String clusterName, String certificate, String component) {
-        List<String> certificateChains = SystemTestCertManager.getCertificateChain(clusterName + "-" + component);
-
-        assertThat(certificate, containsString(certificateChains.get(0)));
-        assertThat(certificate, containsString(certificateChains.get(1)));
-        assertThat(certificate, containsString(OPENSSL_RETURN_CODE));
-    }
-
-    @ParallelNamespaceTest
-    @Tag(INTERNAL_CLIENTS_USED)
     @Tag(ROLLING_UPDATE)
     @Tag(CRUISE_CONTROL)
     @Tag("ClusterCaCerts")
-    void testAutoRenewClusterCaCertsTriggeredByAnno(ExtensionContext extensionContext) {
+    void testAutoRenewClusterCaCertsTriggeredByAnno() {
         autoRenewSomeCaCertsTriggeredByAnno(
-                extensionContext,
-                /* ZK node need new certs */
-                true,
                 /* brokers need new certs */
                 true,
                 /* eo needs new cert */
@@ -185,15 +115,11 @@ class SecurityST extends AbstractST {
     }
 
     @ParallelNamespaceTest
-    @Tag(INTERNAL_CLIENTS_USED)
     @Tag(ROLLING_UPDATE)
     @Tag(CRUISE_CONTROL)
     @Tag("ClientsCaCerts")
-    void testAutoRenewClientsCaCertsTriggeredByAnno(ExtensionContext extensionContext) {
+    void testAutoRenewClientsCaCertsTriggeredByAnno() {
         autoRenewSomeCaCertsTriggeredByAnno(
-            extensionContext,
-                /* no communication between clients and zk, so no need to roll */
-                false,
                 /* brokers need to trust client certs with new cert */
                 true,
                 /* eo needs to generate new client certs */
@@ -204,14 +130,11 @@ class SecurityST extends AbstractST {
     @ParallelNamespaceTest
     @Tag(SANITY)
     @Tag(ACCEPTANCE)
-    @Tag(INTERNAL_CLIENTS_USED)
     @Tag(ROLLING_UPDATE)
     @Tag(CRUISE_CONTROL)
     @Tag("AllCaCerts")
-    void testAutoRenewAllCaCertsTriggeredByAnno(ExtensionContext extensionContext) {
+    void testAutoRenewAllCaCertsTriggeredByAnno() {
         autoRenewSomeCaCertsTriggeredByAnno(
-            extensionContext,
-                true,
                 true,
                 true,
                 true);
@@ -219,21 +142,19 @@ class SecurityST extends AbstractST {
 
     @SuppressWarnings({"checkstyle:MethodLength", "checkstyle:NPathComplexity"})
     void autoRenewSomeCaCertsTriggeredByAnno(
-            ExtensionContext extensionContext,
-            boolean zkShouldRoll,
             boolean kafkaShouldRoll,
             boolean eoShouldRoll,
             boolean keAndCCShouldRoll) {
 
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
-        createKafkaCluster(extensionContext, testStorage.getClusterName());
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
+        createKafkaCluster(testStorage);
 
         List<String> secrets;
 
         // to make it parallel we need decision maker...
-        if (extensionContext.getTags().contains("ClusterCaCerts")) {
+        if (ResourceManager.getTestContext().getTags().contains("ClusterCaCerts")) {
             secrets = Arrays.asList(clusterCaCertificateSecretName(testStorage.getClusterName()));
-        } else if (extensionContext.getTags().contains("ClientsCaCerts")) {
+        } else if (ResourceManager.getTestContext().getTags().contains("ClientsCaCerts")) {
             secrets = Arrays.asList(clientsCaCertificateSecretName(testStorage.getClusterName()));
         } else {
             // AllCaKeys
@@ -241,30 +162,21 @@ class SecurityST extends AbstractST {
                 clientsCaCertificateSecretName(testStorage.getClusterName()));
         }
 
-        resourceManager.createResourceWithWait(extensionContext,
+        resourceManager.createResourceWithWait(
             KafkaUserTemplates.tlsUser(testStorage).build(),
             KafkaTopicTemplates.topic(testStorage).build()
         );
 
-        KafkaClients kafkaClients = new KafkaClientsBuilder()
-            .withTopicName(testStorage.getTopicName())
-            .withMessageCount(testStorage.getMessageCount())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(testStorage.getClusterName()))
-            .withProducerName(testStorage.getProducerName())
-            .withConsumerName(testStorage.getConsumerName())
-            .withNamespaceName(testStorage.getNamespaceName())
-            .withUsername(testStorage.getUsername())
-            .build();
-
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForClientsSuccess(testStorage);
+        KafkaClients kafkaClients = ClientUtils.getInstantTlsClients(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantClientSuccess(testStorage);
 
         // Get all pods, and their resource versions
-        Map<String, String> zkPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getZookeeperSelector());
-        Map<String, String> kafkaPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector());
+        Map<String, String> controllerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getControllerSelector());
+        Map<String, String> brokerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector());
         Map<String, String> eoPod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), testStorage.getEoDeploymentName());
-        Map<String, String> ccPod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), CruiseControlResources.deploymentName(testStorage.getClusterName()));
-        Map<String, String> kePod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), KafkaExporterResources.deploymentName(testStorage.getClusterName()));
+        Map<String, String> ccPod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), CruiseControlResources.componentName(testStorage.getClusterName()));
+        Map<String, String> kePod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), KafkaExporterResources.componentName(testStorage.getClusterName()));
 
         LOGGER.info("Triggering CA cert renewal by adding the annotation");
         Map<String, String> initialCaCerts = new HashMap<>();
@@ -282,15 +194,10 @@ class SecurityST extends AbstractST {
             kubeClient().patchSecret(testStorage.getNamespaceName(), secretName, annotated);
         }
 
-        if (!Environment.isKRaftModeEnabled()) {
-            if (zkShouldRoll) {
-                LOGGER.info("Waiting for ZK rolling restart");
-                RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getZookeeperSelector(), 3, zkPods);
-            }
-        }
         if (kafkaShouldRoll) {
             LOGGER.info("Waiting for Kafka rolling restart");
-            RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getKafkaSelector(), 3, kafkaPods);
+            RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getControllerSelector(), 3, brokerPods);
+            RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getBrokerSelector(), 3, brokerPods);
         }
         if (eoShouldRoll) {
             LOGGER.info("Waiting for EO rolling restart");
@@ -298,8 +205,8 @@ class SecurityST extends AbstractST {
         }
         if (keAndCCShouldRoll) {
             LOGGER.info("Waiting for CC and KE rolling restart");
-            kePod = DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), KafkaExporterResources.deploymentName(testStorage.getClusterName()), 1, kePod);
-            ccPod = DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), CruiseControlResources.deploymentName(testStorage.getClusterName()), 1, ccPod);
+            kePod = DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), KafkaExporterResources.componentName(testStorage.getClusterName()), 1, kePod);
+            ccPod = DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), CruiseControlResources.componentName(testStorage.getClusterName()), 1, ccPod);
         }
 
         LOGGER.info("Ensuring the certificates have been replaced");
@@ -312,105 +219,86 @@ class SecurityST extends AbstractST {
                 value, is(not(initialCaCerts.get(secretName))));
         }
 
-        kafkaClients = new KafkaClientsBuilder(kafkaClients)
-            .withConsumerGroup(ClientUtils.generateRandomConsumerGroup())
-            .build();
-
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForConsumerClientSuccess(testStorage);
+        kafkaClients.generateNewConsumerGroup();
+        resourceManager.createResourceWithWait(kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantConsumerClientSuccess(testStorage);
 
         // Check a new client (signed by new client key) can consume
         String bobUserName = "bob-" + testStorage.getUsername();
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), testStorage.getClusterName(), bobUserName).build());
+        resourceManager.createResourceWithWait(KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), bobUserName, testStorage.getClusterName()).build());
 
         kafkaClients = new KafkaClientsBuilder(kafkaClients)
             .withConsumerGroup(ClientUtils.generateRandomConsumerGroup())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(testStorage.getClusterName()))
             .withUsername(bobUserName)
             .build();
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForConsumerClientSuccess(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantConsumerClientSuccess(testStorage);
 
-        if (!Environment.isKRaftModeEnabled()) {
-            if (!zkShouldRoll) {
-                assertThat("ZK Pods should not roll, but did.", PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getZookeeperSelector()), is(zkPods));
-            }
-        }
         if (!kafkaShouldRoll) {
-            assertThat("Kafka Pods should not roll, but did.", PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector()), is(kafkaPods));
+            assertThat("Kafka Pods should not roll, but did.", PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector()), is(brokerPods));
+            assertThat("Kafka Pods should not roll, but did.", PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector()), is(brokerPods));
         }
         if (!eoShouldRoll) {
             assertThat("EO Pod should not roll, but did.", DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), testStorage.getEoDeploymentName()), is(eoPod));
         }
         if (!keAndCCShouldRoll) {
-            assertThat("CC Pod should not roll, but did.", DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), CruiseControlResources.deploymentName(testStorage.getClusterName())), is(ccPod));
-            assertThat("KE Pod should not roll, but did.", DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), KafkaExporterResources.deploymentName(testStorage.getClusterName())), is(kePod));
+            assertThat("CC Pod should not roll, but did.", DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), CruiseControlResources.componentName(testStorage.getClusterName())), is(ccPod));
+            assertThat("KE Pod should not roll, but did.", DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), KafkaExporterResources.componentName(testStorage.getClusterName())), is(kePod));
         }
     }
 
     @ParallelNamespaceTest
-    @Tag(INTERNAL_CLIENTS_USED)
     @Tag(ROLLING_UPDATE)
     @Tag(CRUISE_CONTROL)
     @Tag("ClusterCaKeys")
-    void testAutoReplaceClusterCaKeysTriggeredByAnno(ExtensionContext extensionContext) {
+    void testAutoReplaceClusterCaKeysTriggeredByAnno() {
         autoReplaceSomeKeysTriggeredByAnno(
-            extensionContext,
                 3, // additional third rolling due to the removal of the older cluster CA certificate
-                true,
                 true,
                 true,
                 true);
     }
 
     @ParallelNamespaceTest
-    @Tag(INTERNAL_CLIENTS_USED)
     @Tag(ROLLING_UPDATE)
     @Tag(CRUISE_CONTROL)
     @Tag("ClientsCaKeys")
-    void testAutoReplaceClientsCaKeysTriggeredByAnno(ExtensionContext extensionContext) {
+    void testAutoReplaceClientsCaKeysTriggeredByAnno() {
         autoReplaceSomeKeysTriggeredByAnno(
-            extensionContext,
-                2,
-                false,
+                1,
                 true,
                 false,
                 false);
     }
 
     @ParallelNamespaceTest
-    @Tag(INTERNAL_CLIENTS_USED)
     @Tag(ROLLING_UPDATE)
     @Tag(CRUISE_CONTROL)
     @Tag("AllCaKeys")
-    void testAutoReplaceAllCaKeysTriggeredByAnno(ExtensionContext extensionContext) {
+    void testAutoReplaceAllCaKeysTriggeredByAnno() {
         autoReplaceSomeKeysTriggeredByAnno(
-            extensionContext,
                 3, // additional third rolling due to the removal of the older cluster CA certificate
-                true,
                 true,
                 true,
                 true);
     }
 
     @SuppressWarnings({"checkstyle:MethodLength", "checkstyle:NPathComplexity", "checkstyle:CyclomaticComplexity"})
-    void autoReplaceSomeKeysTriggeredByAnno(ExtensionContext extensionContext,
-                                            int expectedRolls,
-                                            boolean zkShouldRoll,
+    void autoReplaceSomeKeysTriggeredByAnno(int expectedRolls,
                                             boolean kafkaShouldRoll,
                                             boolean eoShouldRoll,
                                             boolean keAndCCShouldRoll) {
 
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
         List<String> secrets = null;
 
         // to make it parallel we need decision maker...
-        if (extensionContext.getTags().contains("ClusterCaKeys")) {
+        if (ResourceManager.getTestContext().getTags().contains("ClusterCaKeys")) {
             secrets = Arrays.asList(clusterCaKeySecretName(testStorage.getClusterName()));
-        } else if (extensionContext.getTags().contains("ClientsCaKeys")) {
+        } else if (ResourceManager.getTestContext().getTags().contains("ClientsCaKeys")) {
             secrets = Arrays.asList(clientsCaKeySecretName(testStorage.getClusterName()));
         } else {
             // AllCaKeys
@@ -418,32 +306,23 @@ class SecurityST extends AbstractST {
                 clientsCaKeySecretName(testStorage.getClusterName()));
         }
 
-        createKafkaCluster(extensionContext, testStorage.getClusterName());
+        createKafkaCluster(testStorage);
 
-        resourceManager.createResourceWithWait(extensionContext,
+        resourceManager.createResourceWithWait(
             KafkaUserTemplates.tlsUser(testStorage).build(),
             KafkaTopicTemplates.topic(testStorage).build()
         );
 
-        KafkaClients kafkaClients = new KafkaClientsBuilder()
-            .withTopicName(testStorage.getTopicName())
-            .withMessageCount(testStorage.getMessageCount())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(testStorage.getClusterName()))
-            .withProducerName(testStorage.getProducerName())
-            .withConsumerName(testStorage.getConsumerName())
-            .withNamespaceName(testStorage.getNamespaceName())
-            .withUsername(testStorage.getUsername())
-            .build();
-
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForClientsSuccess(testStorage);
+        KafkaClients kafkaClients = ClientUtils.getInstantTlsClients(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantClientSuccess(testStorage);
 
         // Get all pods, and their resource versions
-        Map<String, String> zkPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getZookeeperSelector());
-        Map<String, String> kafkaPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector());
+        Map<String, String> controllerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getControllerSelector());
+        Map<String, String> brokerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector());
         Map<String, String> eoPod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), testStorage.getEoDeploymentName());
-        Map<String, String> ccPod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), CruiseControlResources.deploymentName(testStorage.getClusterName()));
-        Map<String, String> kePod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), KafkaExporterResources.deploymentName(testStorage.getClusterName()));
+        Map<String, String> ccPod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), CruiseControlResources.componentName(testStorage.getClusterName()));
+        Map<String, String> kePod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), KafkaExporterResources.componentName(testStorage.getClusterName()));
 
         LOGGER.info("Triggering CA cert renewal by adding the annotation");
         Map<String, String> initialCaKeys = new HashMap<>();
@@ -467,20 +346,16 @@ class SecurityST extends AbstractST {
                 Pod coPod = kubeClient().listPodsByPrefixInName(clusterOperator.getDeploymentNamespace(), clusterOperator.getClusterOperatorName()).get(0);
                 kubeClient().deletePod(clusterOperator.getDeploymentNamespace(), coPod);
             }
-            if (!Environment.isKRaftModeEnabled()) {
-                if (zkShouldRoll) {
-                    LOGGER.info("Waiting for ZK rolling restart ({})", i);
-                    zkPods = i < expectedRolls ?
-                            RollingUpdateUtils.waitTillComponentHasRolled(testStorage.getNamespaceName(), testStorage.getZookeeperSelector(), zkPods) :
-                            RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getZookeeperSelector(), 3, zkPods);
-                }
-            }
 
             if (kafkaShouldRoll) {
                 LOGGER.info("Waiting for Kafka rolling restart ({})", i);
-                kafkaPods = i < expectedRolls ?
-                        RollingUpdateUtils.waitTillComponentHasRolled(testStorage.getNamespaceName(), testStorage.getKafkaSelector(), kafkaPods) :
-                        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getKafkaSelector(), 3, kafkaPods);
+                controllerPods = i < expectedRolls ?
+                    RollingUpdateUtils.waitTillComponentHasRolled(testStorage.getNamespaceName(), testStorage.getControllerSelector(), controllerPods) :
+                    RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getControllerSelector(), 3, controllerPods);
+
+                brokerPods = i < expectedRolls ?
+                        RollingUpdateUtils.waitTillComponentHasRolled(testStorage.getNamespaceName(), testStorage.getBrokerSelector(), brokerPods) :
+                        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getBrokerSelector(), 3, brokerPods);
             }
 
             if (eoShouldRoll) {
@@ -493,12 +368,12 @@ class SecurityST extends AbstractST {
             if (keAndCCShouldRoll) {
                 LOGGER.info("Waiting for KafkaExporter and CruiseControl rolling restart ({})", i);
                 kePod = i < expectedRolls ?
-                    DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), KafkaExporterResources.deploymentName(testStorage.getClusterName()), kePod) :
-                    DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), KafkaExporterResources.deploymentName(testStorage.getClusterName()), 1, kePod);
+                    DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), KafkaExporterResources.componentName(testStorage.getClusterName()), kePod) :
+                    DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), KafkaExporterResources.componentName(testStorage.getClusterName()), 1, kePod);
 
                 ccPod = i < expectedRolls ?
-                    DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), CruiseControlResources.deploymentName(testStorage.getClusterName()), ccPod) :
-                    DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), CruiseControlResources.deploymentName(testStorage.getClusterName()), 1, ccPod);
+                    DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), CruiseControlResources.componentName(testStorage.getClusterName()), ccPod) :
+                    DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), CruiseControlResources.componentName(testStorage.getClusterName()), 1, ccPod);
             }
         }
 
@@ -513,36 +388,27 @@ class SecurityST extends AbstractST {
                     value, is(not(initialCaKeys.get(secretName))));
         }
 
-        kafkaClients = new KafkaClientsBuilder(kafkaClients)
-            .withConsumerGroup(ClientUtils.generateRandomConsumerGroup())
-            .build();
-
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForConsumerClientSuccess(testStorage);
+        kafkaClients.generateNewConsumerGroup();
+        resourceManager.createResourceWithWait(kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantConsumerClientSuccess(testStorage);
 
         // Finally check a new client (signed by new client key) can consume
 
         final String bobUserName = "bobik-" + testStorage.getUsername();
 
-        resourceManager.createResourceWithWait(extensionContext,  KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), testStorage.getClusterName(), bobUserName).build());
+        resourceManager.createResourceWithWait(KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), bobUserName, testStorage.getClusterName()).build());
 
         kafkaClients = new KafkaClientsBuilder(kafkaClients)
             .withConsumerGroup(ClientUtils.generateRandomConsumerGroup())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(testStorage.getClusterName()))
             .withUsername(bobUserName)
             .build();
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForConsumerClientSuccess(testStorage);
-
-        if (!Environment.isKRaftModeEnabled()) {
-            if (!zkShouldRoll) {
-                assertThat("ZK Pods should not roll, but did.", PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getZookeeperSelector()), is(zkPods));
-            }
-        }
+        resourceManager.createResourceWithWait(kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantConsumerClientSuccess(testStorage);
 
         if (!kafkaShouldRoll) {
-            assertThat("Kafka Pods should not roll, but did.", PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector()), is(kafkaPods));
+            assertThat("Controller Pods should not roll, but did.", PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getControllerSelector()), is(controllerPods));
+            assertThat("Broker Pods should not roll, but did.", PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector()), is(brokerPods));
         }
 
         if (!eoShouldRoll) {
@@ -550,82 +416,87 @@ class SecurityST extends AbstractST {
         }
 
         if (!keAndCCShouldRoll) {
-            assertThat("CC Pod should not roll, but did.", DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), CruiseControlResources.deploymentName(testStorage.getClusterName())), is(ccPod));
-            assertThat("KE Pod should not roll, but did.", DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), KafkaExporterResources.deploymentName(testStorage.getClusterName())), is(kePod));
+            assertThat("CC Pod should not roll, but did.", DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), CruiseControlResources.componentName(testStorage.getClusterName())), is(ccPod));
+            assertThat("KE Pod should not roll, but did.", DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), KafkaExporterResources.componentName(testStorage.getClusterName())), is(kePod));
         }
     }
 
-    private void createKafkaCluster(ExtensionContext extensionContext, String clusterName) {
+    private void createKafkaCluster(TestStorage testStorage) {
         LOGGER.info("Creating a cluster");
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaPersistent(clusterName, 3)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPoolPersistentStorage(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3)
+                .editSpec()
+                    .withNewPersistentClaimStorage()
+                        .withSize("2Gi")
+                        .withDeleteClaim(true)
+                    .endPersistentClaimStorage()
+                .endSpec()
+                .build(),
+            KafkaNodePoolTemplates.controllerPoolPersistentStorage(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3)
+                .editSpec()
+                    .withNewPersistentClaimStorage()
+                        .withSize("2Gi")
+                        .withDeleteClaim(true)
+                    .endPersistentClaimStorage()
+                .endSpec()
+                .build()
+        );
+
+        Kafka kafka = KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editSpec()
                 .editKafka()
                     .withListeners(new GenericKafkaListenerBuilder()
-                                .withName(Constants.PLAIN_LISTENER_DEFAULT_NAME)
-                                .withPort(9092)
-                                .withType(KafkaListenerType.INTERNAL)
-                                .withTls(false)
-                                .build(),
-                            new GenericKafkaListenerBuilder()
-                                .withName(Constants.TLS_LISTENER_DEFAULT_NAME)
-                                .withPort(9093)
-                                .withType(KafkaListenerType.INTERNAL)
-                                .withTls(true)
-                                .withNewKafkaListenerAuthenticationTlsAuth()
-                                .endKafkaListenerAuthenticationTlsAuth()
-                                .build())
+                            .withName(TestConstants.PLAIN_LISTENER_DEFAULT_NAME)
+                            .withPort(9092)
+                            .withType(KafkaListenerType.INTERNAL)
+                            .withTls(false)
+                            .build(),
+                        new GenericKafkaListenerBuilder()
+                            .withName(TestConstants.TLS_LISTENER_DEFAULT_NAME)
+                            .withPort(9093)
+                            .withType(KafkaListenerType.INTERNAL)
+                            .withTls(true)
+                            .withNewKafkaListenerAuthenticationTlsAuth()
+                            .endKafkaListenerAuthenticationTlsAuth()
+                            .build())
                     .withConfig(singletonMap("default.replication.factor", 3))
                     .withNewPersistentClaimStorage()
                         .withSize("2Gi")
                         .withDeleteClaim(true)
                     .endPersistentClaimStorage()
                 .endKafka()
-                .editZookeeper()
-                    .withNewPersistentClaimStorage()
-                        .withSize("2Gi")
-                        .withDeleteClaim(true)
-                    .endPersistentClaimStorage()
-                .endZookeeper()
                 .withNewCruiseControl()
                 .endCruiseControl()
                 .withNewKafkaExporter()
                 .endKafkaExporter()
             .endSpec()
-            .build());
+            .build();
+
+        resourceManager.createResourceWithWait(kafka);
     }
 
     @ParallelNamespaceTest
-    @Tag(INTERNAL_CLIENTS_USED)
     @Tag(CRUISE_CONTROL)
-    void testAutoRenewCaCertsTriggerByExpiredCertificate(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
+    void testAutoRenewCaCertsTriggerByExpiredCertificate() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
         // 1. Create the Secrets already, and a certificate that's already expired
         InputStream secretInputStream = getClass().getClassLoader().getResourceAsStream("security-st-certs/expired-cluster-ca.crt");
-        String clusterCaCert = TestUtils.readResource(secretInputStream);
+        String clusterCaCert = ReadWriteUtils.readInputStream(secretInputStream);
         SecretUtils.createSecret(testStorage.getNamespaceName(), clusterCaCertificateSecretName(testStorage.getClusterName()), "ca.crt", clusterCaCert);
 
         // 2. Now create a cluster
-        createKafkaCluster(extensionContext, testStorage.getClusterName());
+        createKafkaCluster(testStorage);
 
-        resourceManager.createResourceWithWait(extensionContext,
+        resourceManager.createResourceWithWait(
             KafkaUserTemplates.tlsUser(testStorage).build(),
             KafkaTopicTemplates.topic(testStorage).build()
         );
 
-        KafkaClients kafkaClients = new KafkaClientsBuilder()
-            .withTopicName(testStorage.getTopicName())
-            .withMessageCount(testStorage.getMessageCount())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(testStorage.getClusterName()))
-            .withProducerName(testStorage.getProducerName())
-            .withConsumerName(testStorage.getConsumerName())
-            .withNamespaceName(testStorage.getNamespaceName())
-            .withUsername(testStorage.getUsername())
-            .build();
-
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForClientsSuccess(testStorage);
+        final KafkaClients kafkaClients = ClientUtils.getInstantTlsClients(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantClientSuccess(testStorage);
 
         // Wait until the certificates have been replaced
         SecretUtils.waitForCertToChange(testStorage.getNamespaceName(), clusterCaCert, clusterCaCertificateSecretName(testStorage.getClusterName()));
@@ -633,14 +504,13 @@ class SecurityST extends AbstractST {
         // Wait until the pods are all up and ready
         KafkaUtils.waitForClusterStability(testStorage.getNamespaceName(), testStorage.getClusterName());
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForClientsSuccess(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantClientSuccess(testStorage);
     }
 
     @ParallelNamespaceTest
-    @Tag(INTERNAL_CLIENTS_USED)
-    void testCertRenewalInMaintenanceTimeWindow(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
+    void testCertRenewalInMaintenanceTimeWindow() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
         final String clusterSecretName = KafkaResources.clusterCaCertificateSecretName(testStorage.getClusterName());
         final String clientsSecretName = KafkaResources.clientsCaCertificateSecretName(testStorage.getClusterName());
 
@@ -654,12 +524,16 @@ class SecurityST extends AbstractST {
         String maintenanceWindowCron = "* " + windowStartMin + "-" + windowStopMin + " * * * ? *";
         LOGGER.info("Initial maintenanceTimeWindow is: {}", maintenanceWindowCron);
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaPersistent(testStorage.getClusterName(), 3, 1)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPoolPersistentStorage(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPoolPersistentStorage(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 1).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editSpec()
                 .addToMaintenanceTimeWindows(maintenanceWindowCron)
                 .editKafka()
                     .withListeners(new GenericKafkaListenerBuilder()
-                        .withName(Constants.TLS_LISTENER_DEFAULT_NAME)
+                        .withName(TestConstants.TLS_LISTENER_DEFAULT_NAME)
                         .withPort(9093)
                         .withType(KafkaListenerType.INTERNAL)
                         .withTls(true)
@@ -677,35 +551,23 @@ class SecurityST extends AbstractST {
             .endSpec()
             .build());
 
-        resourceManager.createResourceWithWait(extensionContext,
+        resourceManager.createResourceWithWait(
             KafkaUserTemplates.tlsUser(testStorage).build(),
             KafkaTopicTemplates.topic(testStorage).build()
         );
 
         Secret kafkaUserSecret = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), testStorage.getUsername());
 
-        KafkaClients kafkaClients = new KafkaClientsBuilder()
-            .withTopicName(testStorage.getTopicName())
-            .withMessageCount(testStorage.getMessageCount())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(testStorage.getClusterName()))
-            .withProducerName(testStorage.getProducerName())
-            .withConsumerName(testStorage.getConsumerName())
-            .withNamespaceName(testStorage.getNamespaceName())
-            .withUsername(testStorage.getUsername())
-            .build();
-
-        Map<String, String> kafkaPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector());
+        Map<String, String> brokerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector());
 
         CertificateAuthority newCAValidity = new CertificateAuthority();
         newCAValidity.setRenewalDays(150);
         newCAValidity.setValidityDays(200);
 
-        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getClusterName(),
-            k -> {
-                k.getSpec().setClusterCa(newCAValidity);
-                k.getSpec().setClientsCa(newCAValidity);
-            },
-            testStorage.getNamespaceName()
+        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getClusterName(), k -> {
+            k.getSpec().setClusterCa(newCAValidity);
+            k.getSpec().setClientsCa(newCAValidity);
+        }
         );
 
         KafkaUtils.waitForKafkaStatusUpdate(testStorage.getNamespaceName(), testStorage.getClusterName());
@@ -716,7 +578,7 @@ class SecurityST extends AbstractST {
         assertThat("Clients CA certificate has been renewed outside of maintenanceTimeWindows",
                 secretCaClients.getMetadata().getAnnotations().get(Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION), is("0"));
 
-        assertThat("Rolling update was performed outside of maintenanceTimeWindows", kafkaPods, is(PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector())));
+        assertThat("Rolling update was performed outside of maintenanceTimeWindows", brokerPods, is(PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector())));
 
         maintenanceWindowCron = "* " + LocalDateTime.now().getMinute() + "-" + windowStopMin + " * * * ? *";
         LOGGER.info("Set maintenanceTimeWindow to start now to save time: {}", maintenanceWindowCron);
@@ -724,10 +586,10 @@ class SecurityST extends AbstractST {
         List<String> maintenanceTimeWindows = KafkaResource.kafkaClient().inNamespace(testStorage.getNamespaceName()).withName(testStorage.getClusterName()).get().getSpec().getMaintenanceTimeWindows();
         maintenanceTimeWindows.add(maintenanceWindowCron);
 
-        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getClusterName(), kafka -> kafka.getSpec().setMaintenanceTimeWindows(maintenanceTimeWindows), testStorage.getNamespaceName());
+        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getClusterName(), kafka -> kafka.getSpec().setMaintenanceTimeWindows(maintenanceTimeWindows));
 
         LOGGER.info("Waiting for rolling update to trigger during maintenanceTimeWindows");
-        RollingUpdateUtils.waitTillComponentHasRolled(testStorage.getNamespaceName(), testStorage.getKafkaSelector(), 3, kafkaPods);
+        RollingUpdateUtils.waitTillComponentHasRolled(testStorage.getNamespaceName(), testStorage.getBrokerSelector(), 3, brokerPods);
 
         Secret kafkaUserSecretRolled = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), testStorage.getUsername());
         secretCaCluster = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), clusterSecretName);
@@ -740,39 +602,33 @@ class SecurityST extends AbstractST {
         assertThat("KafkaUser certificate has not been renewed within maintenanceTimeWindows",
                 kafkaUserSecret, not(sameInstance(kafkaUserSecretRolled)));
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForClientsSuccess(testStorage);
+        final KafkaClients kafkaClients = ClientUtils.getInstantTlsClients(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantClientSuccess(testStorage);
     }
 
     @ParallelNamespaceTest
-    @Tag(INTERNAL_CLIENTS_USED)
-    void testCertRegeneratedAfterInternalCAisDeleted(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
+    void testCertRegeneratedAfterInternalCAisDeleted() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaPersistent(testStorage.getClusterName(), 3, 1).build());
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPoolPersistentStorage(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPoolPersistentStorage(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 1).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3).build());
 
-        Map<String, String> kafkaPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector());
+        Map<String, String> brokerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector());
 
-        resourceManager.createResourceWithWait(extensionContext,
+        resourceManager.createResourceWithWait(
             KafkaUserTemplates.tlsUser(testStorage).build(),
             KafkaTopicTemplates.topic(testStorage).build()
         );
-
-        KafkaClients kafkaClients = new KafkaClientsBuilder()
-            .withTopicName(testStorage.getTopicName())
-            .withMessageCount(testStorage.getMessageCount())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(testStorage.getClusterName()))
-            .withProducerName(testStorage.getProducerName())
-            .withConsumerName(testStorage.getConsumerName())
-            .withNamespaceName(testStorage.getNamespaceName())
-            .withUsername(testStorage.getUsername())
-            .build();
 
         List<Secret> secrets = kubeClient().listSecrets(testStorage.getNamespaceName()).stream()
             .filter(secret ->
                 secret.getMetadata().getName().startsWith(testStorage.getClusterName()) &&
                 secret.getMetadata().getName().endsWith("ca-cert"))
-            .collect(Collectors.toList());
+            .toList();
 
         for (Secret s : secrets) {
             LOGGER.info("Verifying that Secret: {}/{} with name {} is present", testStorage.getNamespaceName(), s, s.getMetadata().getName());
@@ -784,8 +640,8 @@ class SecurityST extends AbstractST {
             kubeClient().deleteSecret(testStorage.getNamespaceName(), s.getMetadata().getName());
         }
 
-        PodUtils.verifyThatRunningPodsAreStable(testStorage.getNamespaceName(), testStorage.getKafkaStatefulSetName());
-        RollingUpdateUtils.waitTillComponentHasRolled(testStorage.getNamespaceName(), testStorage.getKafkaSelector(), 3, kafkaPods);
+        PodUtils.verifyThatRunningPodsAreStable(testStorage.getNamespaceName(), testStorage.getBrokerComponentName());
+        RollingUpdateUtils.waitTillComponentHasRolled(testStorage.getNamespaceName(), testStorage.getBrokerSelector(), 3, brokerPods);
 
         for (Secret s : secrets) {
             SecretUtils.waitForSecretReady(testStorage.getNamespaceName(), s.getMetadata().getName(), () -> { });
@@ -793,30 +649,35 @@ class SecurityST extends AbstractST {
 
         List<Secret> regeneratedSecrets = kubeClient().listSecrets(testStorage.getNamespaceName()).stream()
                 .filter(secret -> secret.getMetadata().getName().endsWith("ca-cert"))
-                .collect(Collectors.toList());
+                .toList();
 
         for (int i = 0; i < secrets.size(); i++) {
             assertThat("Certificates has different cert UIDs", !secrets.get(i).getData().get("ca.crt").equals(regeneratedSecrets.get(i).getData().get("ca.crt")));
         }
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForClientsSuccess(testStorage);
+        final KafkaClients kafkaClients = ClientUtils.getInstantTlsClients(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantClientSuccess(testStorage);
     }
 
     @ParallelNamespaceTest
     @Tag(CONNECT)
     @Tag(CONNECT_COMPONENTS)
-    void testTlsHostnameVerificationWithKafkaConnect(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext);
+    void testTlsHostnameVerificationWithKafkaConnect() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(testStorage.getClusterName(), 3, 1).build());
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 1).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3).build());
         LOGGER.info("Getting IP of the bootstrap service");
 
         String ipOfBootstrapService = kubeClient(testStorage.getNamespaceName()).getService(testStorage.getNamespaceName(), KafkaResources.bootstrapServiceName(testStorage.getClusterName())).getSpec().getClusterIP();
 
         LOGGER.info("KafkaConnect without config {} will not connect to {}:9093", "ssl.endpoint.identification.algorithm", ipOfBootstrapService);
 
-        resourceManager.createResourceWithoutWait(extensionContext, KafkaConnectTemplates.kafkaConnect(testStorage.getClusterName(), testStorage.getNamespaceName(), 1)
+        resourceManager.createResourceWithoutWait(KafkaConnectTemplates.kafkaConnect(testStorage.getNamespaceName(), testStorage.getClusterName(), 1)
             .editSpec()
                 .withNewTls()
                     .addNewTrustedCertificate()
@@ -837,9 +698,9 @@ class SecurityST extends AbstractST {
         assertThat("CrashLoopBackOff", is(kubeClient(testStorage.getNamespaceName()).getPod(testStorage.getNamespaceName(), kafkaConnectPodName).getStatus().getContainerStatuses()
                 .get(0).getState().getWaiting().getReason()));
 
-        KafkaConnectResource.replaceKafkaConnectResourceInSpecificNamespace(testStorage.getClusterName(), kc -> {
+        KafkaConnectResource.replaceKafkaConnectResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getClusterName(), kc -> {
             kc.getSpec().getConfig().put("ssl.endpoint.identification.algorithm", "");
-        }, testStorage.getNamespaceName());
+        });
 
         LOGGER.info("KafkaConnect with config {} will connect to {}:9093", "ssl.endpoint.identification.algorithm", ipOfBootstrapService);
 
@@ -847,84 +708,26 @@ class SecurityST extends AbstractST {
     }
 
     @ParallelNamespaceTest
-    @Tag(MIRROR_MAKER)
-    void testTlsHostnameVerificationWithMirrorMaker(ExtensionContext extensionContext) {
-        final TestStorage testStorage = storageMap.get(extensionContext);
-
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(testStorage.getSourceClusterName(), 1, 1).build());
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(testStorage.getTargetClusterName(), 1, 1).build());
-
-        LOGGER.info("Getting IP of the source bootstrap service for consumer");
-        String ipOfSourceBootstrapService = kubeClient(testStorage.getNamespaceName()).getService(testStorage.getNamespaceName(), KafkaResources.bootstrapServiceName(testStorage.getSourceClusterName())).getSpec().getClusterIP();
-
-        LOGGER.info("Getting IP of the target bootstrap service for producer");
-        String ipOfTargetBootstrapService = kubeClient(testStorage.getNamespaceName()).getService(testStorage.getNamespaceName(), KafkaResources.bootstrapServiceName(testStorage.getTargetClusterName())).getSpec().getClusterIP();
-
-        LOGGER.info("KafkaMirrorMaker without config {} will not connect to consumer with address {}:9093", "ssl.endpoint.identification.algorithm", ipOfSourceBootstrapService);
-        LOGGER.info("KafkaMirrorMaker without config {} will not connect to producer with address {}:9093", "ssl.endpoint.identification.algorithm", ipOfTargetBootstrapService);
-
-        resourceManager.createResourceWithoutWait(extensionContext, KafkaMirrorMakerTemplates.kafkaMirrorMaker(testStorage.getClusterName(), testStorage.getSourceClusterName(), testStorage.getTargetClusterName(),
-            ClientUtils.generateRandomConsumerGroup(), 1, true)
-            .editSpec()
-                .editConsumer()
-                    .withNewTls()
-                        .addNewTrustedCertificate()
-                            .withSecretName(KafkaResources.clusterCaCertificateSecretName(testStorage.getSourceClusterName()))
-                            .withCertificate("ca.crt")
-                        .endTrustedCertificate()
-                    .endTls()
-                    .withBootstrapServers(ipOfSourceBootstrapService + ":9093")
-                .endConsumer()
-                .editProducer()
-                    .withNewTls()
-                        .addNewTrustedCertificate()
-                            .withSecretName(KafkaResources.clusterCaCertificateSecretName(testStorage.getTargetClusterName()))
-                            .withCertificate("ca.crt")
-                        .endTrustedCertificate()
-                    .endTls()
-                    .withBootstrapServers(ipOfTargetBootstrapService + ":9093")
-                .endProducer()
-            .endSpec()
-            .build());
-
-        PodUtils.waitUntilPodIsPresent(testStorage.getNamespaceName(), testStorage.getClusterName() + "-mirror-maker");
-
-        String kafkaMirrorMakerPodName = kubeClient(testStorage.getNamespaceName()).listPods(testStorage.getNamespaceName(), testStorage.getClusterName(), Labels.STRIMZI_KIND_LABEL, KafkaMirrorMaker.RESOURCE_KIND).get(0).getMetadata().getName();
-
-        PodUtils.waitUntilPodIsInCrashLoopBackOff(testStorage.getNamespaceName(), kafkaMirrorMakerPodName);
-
-        assertThat("CrashLoopBackOff", is(kubeClient(testStorage.getNamespaceName()).getPod(testStorage.getNamespaceName(), kafkaMirrorMakerPodName).getStatus().getContainerStatuses().get(0)
-                .getState().getWaiting().getReason()));
-
-        LOGGER.info("KafkaMirrorMaker with config {} will connect to consumer with address {}:9093", "ssl.endpoint.identification.algorithm", ipOfSourceBootstrapService);
-        LOGGER.info("KafkaMirrorMaker with config {} will connect to producer with address {}:9093", "ssl.endpoint.identification.algorithm", ipOfTargetBootstrapService);
-
-        LOGGER.info("Adding configuration {} to the MirrorMaker", "ssl.endpoint.identification.algorithm");
-        KafkaMirrorMakerResource.replaceMirrorMakerResourceInSpecificNamespace(testStorage.getClusterName(), mm -> {
-            mm.getSpec().getConsumer().getConfig().put("ssl.endpoint.identification.algorithm", ""); // disable hostname verification
-            mm.getSpec().getProducer().getConfig().put("ssl.endpoint.identification.algorithm", ""); // disable hostname verification
-        }, testStorage.getNamespaceName());
-
-        KafkaMirrorMakerUtils.waitForKafkaMirrorMakerReady(testStorage.getNamespaceName(), testStorage.getClusterName());
-    }
-
-    @ParallelNamespaceTest
     @Tag(NODEPORT_SUPPORTED)
     @Tag(EXTERNAL_CLIENTS_USED)
-    void testAclRuleReadAndWrite(ExtensionContext extensionContext) {
-        final TestStorage testStorage = storageMap.get(extensionContext);
+    void testAclRuleReadAndWrite() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
         final String kafkaUserWrite = "kafka-user-write";
         final String kafkaUserRead = "kafka-user-read";
         final int numberOfMessages = 500;
         final String consumerGroupName = "consumer-group-name-1";
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(testStorage.getClusterName(), 3, 1)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 1).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editSpec()
                 .editKafka()
                     .withNewKafkaAuthorizationSimple()
                     .endKafkaAuthorizationSimple()
                     .withListeners(new GenericKafkaListenerBuilder()
-                            .withName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
+                            .withName(TestConstants.EXTERNAL_LISTENER_DEFAULT_NAME)
                             .withPort(9094)
                             .withType(KafkaListenerType.NODEPORT)
                             .withTls(true)
@@ -934,8 +737,8 @@ class SecurityST extends AbstractST {
             .endSpec()
             .build());
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTopicTemplates.topic(testStorage.getClusterName(), testStorage.getTopicName(), testStorage.getNamespaceName()).build());
-        resourceManager.createResourceWithWait(extensionContext, KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), testStorage.getClusterName(), kafkaUserWrite)
+        resourceManager.createResourceWithWait(KafkaTopicTemplates.topic(testStorage.getNamespaceName(), testStorage.getTopicName(), testStorage.getClusterName()).build());
+        resourceManager.createResourceWithWait(KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), kafkaUserWrite, testStorage.getClusterName())
             .editSpec()
                 .withNewKafkaUserAuthorizationSimple()
                     .addNewAcl()
@@ -957,14 +760,14 @@ class SecurityST extends AbstractST {
             .withKafkaUsername(kafkaUserWrite)
             .withMessageCount(numberOfMessages)
             .withSecurityProtocol(SecurityProtocol.SSL)
-            .withListenerName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
+            .withListenerName(TestConstants.EXTERNAL_LISTENER_DEFAULT_NAME)
             .build();
 
         assertThat(externalKafkaClient.sendMessagesTls(), is(numberOfMessages));
 
         assertThrows(GroupAuthorizationException.class, externalKafkaClient::receiveMessagesTls);
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), testStorage.getClusterName(), kafkaUserRead)
+        resourceManager.createResourceWithWait(KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), kafkaUserRead, testStorage.getClusterName())
             .editSpec()
                 .withNewKafkaUserAuthorizationSimple()
                     .addNewAcl()
@@ -997,21 +800,21 @@ class SecurityST extends AbstractST {
     @ParallelNamespaceTest
     @Tag(NODEPORT_SUPPORTED)
     @Tag(EXTERNAL_CLIENTS_USED)
-    void testAclWithSuperUser(ExtensionContext extensionContext) {
-        final TestStorage testStorage = storageMap.get(extensionContext);
-        final String namespaceName = StUtils.getNamespaceBasedOnRbac(Environment.TEST_SUITE_NAMESPACE, extensionContext);
-        final String clusterName = testStorage.getClusterName();
-        final String topicName = testStorage.getTopicName();
-        final String userName = testStorage.getKafkaUsername();
+    void testAclWithSuperUser() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 3, 1)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 1).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editSpec()
                 .editKafka()
                     .withNewKafkaAuthorizationSimple()
-                        .withSuperUsers("CN=" + userName)
+                        .withSuperUsers("CN=" + testStorage.getKafkaUsername())
                     .endKafkaAuthorizationSimple()
                     .withListeners(new GenericKafkaListenerBuilder()
-                            .withName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
+                            .withName(TestConstants.EXTERNAL_LISTENER_DEFAULT_NAME)
                             .withPort(9094)
                             .withType(KafkaListenerType.NODEPORT)
                             .withTls(true)
@@ -1021,13 +824,13 @@ class SecurityST extends AbstractST {
             .endSpec()
             .build());
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTopicTemplates.topic(clusterName, topicName, namespaceName).build());
-        resourceManager.createResourceWithWait(extensionContext, KafkaUserTemplates.tlsUser(namespaceName, clusterName, userName)
+        resourceManager.createResourceWithWait(KafkaTopicTemplates.topic(testStorage.getNamespaceName(), testStorage.getTopicName(), testStorage.getClusterName()).build());
+        resourceManager.createResourceWithWait(KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), testStorage.getKafkaUsername(), testStorage.getClusterName())
             .editSpec()
                 .withNewKafkaUserAuthorizationSimple()
                     .addNewAcl()
                         .withNewAclRuleTopicResource()
-                            .withName(topicName)
+                            .withName(testStorage.getTopicName())
                         .endAclRuleTopicResource()
                         .withOperations(AclOperation.WRITE, AclOperation.DESCRIBE)
                     .endAcl()
@@ -1035,33 +838,33 @@ class SecurityST extends AbstractST {
             .endSpec()
             .build());
 
-        LOGGER.info("Checking Kafka super user: {}/{} that is able to send messages to Topic: {}", namespaceName, userName, topicName);
+        LOGGER.info("Checking Kafka super user: {}/{} that is able to send messages to Topic: {}", testStorage.getNamespaceName(), testStorage.getKafkaUsername(), testStorage.getTopicName());
 
         ExternalKafkaClient externalKafkaClient = new ExternalKafkaClient.Builder()
-            .withTopicName(topicName)
-            .withNamespaceName(namespaceName)
-            .withClusterName(clusterName)
-            .withKafkaUsername(userName)
-            .withMessageCount(MESSAGE_COUNT)
+            .withTopicName(testStorage.getTopicName())
+            .withNamespaceName(testStorage.getNamespaceName())
+            .withClusterName(testStorage.getClusterName())
+            .withKafkaUsername(testStorage.getKafkaUsername())
+            .withMessageCount(testStorage.getMessageCount())
             .withSecurityProtocol(SecurityProtocol.SSL)
-            .withListenerName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
+            .withListenerName(TestConstants.EXTERNAL_LISTENER_DEFAULT_NAME)
             .build();
 
-        assertThat(externalKafkaClient.sendMessagesTls(), is(MESSAGE_COUNT));
+        assertThat(externalKafkaClient.sendMessagesTls(), is(testStorage.getMessageCount()));
 
         LOGGER.info("Checking Kafka super user: {}/{} that is able to read messages to Topic: {}/{} regardless that " +
-                "we configured Acls with only write operation", namespaceName, userName, namespaceName, topicName);
+                "we configured Acls with only write operation", testStorage.getNamespaceName(), testStorage.getKafkaUsername(), testStorage.getNamespaceName(), testStorage.getTopicName());
 
-        assertThat(externalKafkaClient.receiveMessagesTls(), is(MESSAGE_COUNT));
+        assertThat(externalKafkaClient.receiveMessagesTls(), is(testStorage.getMessageCount()));
 
-        String nonSuperuserName = userName + "-non-super-user";
+        String nonSuperuserName = testStorage.getKafkaUsername() + "-non-super-user";
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaUserTemplates.tlsUser(namespaceName, clusterName, nonSuperuserName)
+        resourceManager.createResourceWithWait(KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), nonSuperuserName, testStorage.getClusterName())
             .editSpec()
                 .withNewKafkaUserAuthorizationSimple()
                     .addNewAcl()
                         .withNewAclRuleTopicResource()
-                            .withName(topicName)
+                            .withName(testStorage.getTopicName())
                         .endAclRuleTopicResource()
                         .withOperations(AclOperation.WRITE, AclOperation.DESCRIBE)
                     .endAcl()
@@ -1069,16 +872,16 @@ class SecurityST extends AbstractST {
             .endSpec()
             .build());
 
-        LOGGER.info("Checking Kafka super user: {}/{} that is able to send messages to Topic: {}/{}", namespaceName, nonSuperuserName, namespaceName, topicName);
+        LOGGER.info("Checking Kafka super user: {}/{} that is able to send messages to Topic: {}/{}", testStorage.getNamespaceName(), nonSuperuserName, testStorage.getNamespaceName(), testStorage.getTopicName());
 
         externalKafkaClient = externalKafkaClient.toBuilder()
             .withKafkaUsername(nonSuperuserName)
             .build();
 
-        assertThat(externalKafkaClient.sendMessagesTls(), is(MESSAGE_COUNT));
+        assertThat(externalKafkaClient.sendMessagesTls(), is(testStorage.getMessageCount()));
 
         LOGGER.info("Checking Kafka super user: {}/{} that is not able to read messages to Topic: {}/{} because of defined" +
-                " ACLs on only write operation", namespaceName, nonSuperuserName, namespaceName, topicName);
+                " ACLs on only write operation", testStorage.getNamespaceName(), nonSuperuserName, testStorage.getNamespaceName(), testStorage.getTopicName());
 
         ExternalKafkaClient newExternalKafkaClient = externalKafkaClient.toBuilder()
             .withConsumerGroupName(ClientUtils.generateRandomConsumerGroup())
@@ -1088,12 +891,15 @@ class SecurityST extends AbstractST {
     }
 
     @ParallelNamespaceTest
-    @Tag(INTERNAL_CLIENTS_USED)
-    void testCaRenewalBreakInMiddle(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
+    void testCaRenewalBreakInMiddle() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPoolPersistentStorage(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPoolPersistentStorage(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3).build()
+        );
         // Extra Kafka configuration ensures that topic created automatically (by producer) will have data available on more than just single replica once one of broker fails
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaPersistent(testStorage.getClusterName(), 3, 3)
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editSpec()
                 .withNewClusterCa()
                     .withRenewalDays(1)
@@ -1106,7 +912,7 @@ class SecurityST extends AbstractST {
             .endSpec()
             .build());
 
-        resourceManager.createResourceWithWait(extensionContext,
+        resourceManager.createResourceWithWait(
             KafkaUserTemplates.tlsUser(testStorage).build(),
             KafkaTopicTemplates.topic(testStorage)
                 .editOrNewSpec()
@@ -1115,24 +921,12 @@ class SecurityST extends AbstractST {
                 .build()
         );
 
-        // Configuration `acks=all` paired with Kafka's `min.insync.replicas=2` enforces there are at least 2 replicas with all produced data before test continues.
-        String producerAdditionConfiguration = "acks=all\n";
-        KafkaClients kafkaClients = new KafkaClientsBuilder()
-            .withTopicName(testStorage.getTopicName())
-            .withMessageCount(testStorage.getMessageCount())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(testStorage.getClusterName()))
-            .withProducerName(testStorage.getProducerName())
-            .withConsumerName(testStorage.getConsumerName())
-            .withNamespaceName(testStorage.getNamespaceName())
-            .withUsername(testStorage.getUsername())
-            .withAdditionalConfig(producerAdditionConfiguration)
-            .build();
+        KafkaClients kafkaClients = ClientUtils.getInstantTlsClients(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantClientSuccess(testStorage);
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForClientsSuccess(testStorage);
-
-        Map<String, String> zkPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getZookeeperSelector());
-        Map<String, String> kafkaPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector());
+        Map<String, String> controllerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getControllerSelector());
+        Map<String, String> brokerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector());
         Map<String, String> eoPods = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), testStorage.getEoDeploymentName());
 
         final String clusterCaCert = kubeClient().getSecret(testStorage.getNamespaceName(), KafkaResources.clusterCaCertificateSecretName(testStorage.getClusterName())).getData().get("ca.crt");
@@ -1141,27 +935,20 @@ class SecurityST extends AbstractST {
             .addToRequests("cpu", new Quantity("100000m"))
             .build();
 
-        if (Environment.isKafkaNodePoolsEnabled()) {
-            KafkaNodePoolResource.replaceKafkaNodePoolResourceInSpecificNamespace(testStorage.getKafkaNodePoolName(), knp -> knp.getSpec().setResources(requirements), testStorage.getNamespaceName());
-        }
-
-        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getClusterName(), k -> {
-            k.getSpec()
-                .getKafka()
-                .setResources(requirements);
-            k.getSpec().setClusterCa(new CertificateAuthorityBuilder()
-                .withRenewalDays(4)
-                .withValidityDays(7)
-                .build());
-        }, testStorage.getNamespaceName());
+        KafkaNodePoolResource.replaceKafkaNodePoolResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), knp -> knp.getSpec().setResources(requirements));
+        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getClusterName(), k -> k.getSpec().setClusterCa(new CertificateAuthorityBuilder()
+            .withRenewalDays(4)
+            .withValidityDays(7)
+            .build())
+        );
 
         TestUtils.waitFor("any Kafka Pod to be in the pending phase because of selected high cpu resource",
-            Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
+            TestConstants.GLOBAL_POLL_INTERVAL, TestConstants.GLOBAL_TIMEOUT,
             () -> {
-                List<Pod> pendingPods = kubeClient().listPodsByPrefixInName(testStorage.getNamespaceName(), testStorage.getKafkaStatefulSetName())
+                List<Pod> pendingPods = kubeClient().listPodsByPrefixInName(testStorage.getNamespaceName(), testStorage.getBrokerComponentName())
                     .stream().filter(pod -> pod.getStatus().getPhase().equals("Pending")).collect(Collectors.toList());
                 if (pendingPods.isEmpty()) {
-                    LOGGER.info("No Pods of {} are in desired state", testStorage.getKafkaStatefulSetName());
+                    LOGGER.info("No Pods of {} are in desired state", testStorage.getBrokerComponentName());
                     return false;
                 } else {
                     LOGGER.info("Pod in 'Pending' state: {}", pendingPods.get(0).getMetadata().getName());
@@ -1170,64 +957,46 @@ class SecurityST extends AbstractST {
             }
         );
 
-        kafkaClients = new KafkaClientsBuilder(kafkaClients)
-            .withConsumerGroup(ClientUtils.generateRandomConsumerGroup())
-            .build();
-
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForConsumerClientSuccess(testStorage);
+        kafkaClients.generateNewConsumerGroup();
+        resourceManager.createResourceWithWait(kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantConsumerClientSuccess(testStorage);
 
         final ResourceRequirements correctRequirements = new ResourceRequirementsBuilder()
             .addToRequests("cpu", new Quantity("200m"))
             .build();
 
-        if (Environment.isKafkaNodePoolsEnabled()) {
-            KafkaNodePoolResource.replaceKafkaNodePoolResourceInSpecificNamespace(testStorage.getKafkaNodePoolName(),
-                knp -> knp.getSpec().setResources(correctRequirements), testStorage.getNamespaceName());
-        }
-
-        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getClusterName(), k -> {
-            k.getSpec()
-                .getKafka()
-                .setResources(new ResourceRequirementsBuilder()
-                    .addToRequests("cpu", new Quantity("200m"))
-                    .build());
-        }, testStorage.getNamespaceName());
+        KafkaNodePoolResource.replaceKafkaNodePoolResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(),
+            knp -> knp.getSpec().setResources(correctRequirements));
 
         // Wait for the certificates to get replaced
         SecretUtils.waitForCertToChange(testStorage.getNamespaceName(), clusterCaCert, KafkaResources.clusterCaCertificateSecretName(testStorage.getClusterName()));
-        if (!Environment.isKRaftModeEnabled()) {
-            RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getZookeeperSelector(), 3, zkPods);
-        }
-        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getKafkaSelector(), 3, kafkaPods);
+        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getControllerSelector(), 3, controllerPods);
+        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getBrokerSelector(), 3, brokerPods);
         DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), testStorage.getEoDeploymentName(), 1, eoPods);
 
-        kafkaClients = new KafkaClientsBuilder(kafkaClients)
-            .withConsumerGroup(ClientUtils.generateRandomConsumerGroup())
-            .build();
-
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForConsumerClientSuccess(testStorage);
+        kafkaClients.generateNewConsumerGroup();
+        resourceManager.createResourceWithWait(kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantConsumerClientSuccess(testStorage);
 
         // Try to send and receive messages with new certificates
         String topicName = KafkaTopicUtils.generateRandomNameOfTopic();
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTopicTemplates.topic(testStorage.getClusterName(), topicName, testStorage.getNamespaceName()).build());
+        resourceManager.createResourceWithWait(KafkaTopicTemplates.topic(testStorage.getNamespaceName(), topicName, testStorage.getClusterName()).build());
 
         kafkaClients = new KafkaClientsBuilder(kafkaClients)
             .withConsumerGroup(ClientUtils.generateRandomConsumerGroup())
             .withTopicName(topicName)
             .build();
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForClientsSuccess(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(testStorage.getClusterName()));
+        ClientUtils.waitForInstantClientSuccess(testStorage);
     }
 
     @ParallelNamespaceTest
     @Tag(CONNECT)
     @Tag(CONNECT_COMPONENTS)
-    void testKafkaAndKafkaConnectTlsVersion(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext);
+    void testKafkaAndKafkaConnectTlsVersion() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
         final Map<String, Object> configWithNewestVersionOfTls = new HashMap<>();
 
         final String tlsVersion12 = "TLSv1.2";
@@ -1238,7 +1007,11 @@ class SecurityST extends AbstractST {
 
         LOGGER.info("Deploying Kafka cluster with the support {} TLS",  tlsVersion12);
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(testStorage.getClusterName(), 3)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editSpec()
                 .editKafka()
                     .withConfig(configWithNewestVersionOfTls)
@@ -1264,7 +1037,7 @@ class SecurityST extends AbstractST {
         configWithLowestVersionOfTls.put(SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG, tlsVersion1);
         configWithLowestVersionOfTls.put(SslConfigs.SSL_PROTOCOL_CONFIG, tlsVersion1);
 
-        resourceManager.createResourceWithoutWait(extensionContext, KafkaConnectTemplates.kafkaConnect(testStorage.getClusterName(), testStorage.getNamespaceName(), 1)
+        resourceManager.createResourceWithoutWait(KafkaConnectTemplates.kafkaConnect(testStorage.getNamespaceName(), testStorage.getClusterName(), 1)
             .editSpec()
                 .withConfig(configWithLowestVersionOfTls)
             .endSpec()
@@ -1276,7 +1049,7 @@ class SecurityST extends AbstractST {
 
         LOGGER.info("Replacing KafkaConnect config to the newest(TLSv1.2) one same as the Kafka Broker has");
 
-        KafkaConnectResource.replaceKafkaConnectResourceInSpecificNamespace(testStorage.getClusterName(), kafkaConnect -> kafkaConnect.getSpec().setConfig(configWithNewestVersionOfTls), testStorage.getNamespaceName());
+        KafkaConnectResource.replaceKafkaConnectResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getClusterName(), kafkaConnect -> kafkaConnect.getSpec().setConfig(configWithNewestVersionOfTls));
 
         LOGGER.info("Verifying that KafkaConnect has the accepted configuration:\n {} -> {}\n {} -> {}",
                 SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG,
@@ -1284,12 +1057,12 @@ class SecurityST extends AbstractST {
                 SslConfigs.SSL_PROTOCOL_CONFIG,
                 SslConfigs.DEFAULT_SSL_PROTOCOL);
 
-        KafkaConnectUtils.waitForKafkaConnectConfigChange(SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG, tlsVersion12, testStorage.getNamespaceName(), testStorage.getClusterName());
-        KafkaConnectUtils.waitForKafkaConnectConfigChange(SslConfigs.SSL_PROTOCOL_CONFIG, SslConfigs.DEFAULT_SSL_PROTOCOL, testStorage.getNamespaceName(), testStorage.getClusterName());
+        KafkaConnectUtils.waitForKafkaConnectConfigChange(testStorage.getNamespaceName(), tlsVersion12, SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG, testStorage.getClusterName());
+        KafkaConnectUtils.waitForKafkaConnectConfigChange(testStorage.getNamespaceName(), SslConfigs.DEFAULT_SSL_PROTOCOL, SslConfigs.SSL_PROTOCOL_CONFIG, testStorage.getClusterName());
 
         LOGGER.info("Verifying that KafkaConnect is stable");
 
-        PodUtils.verifyThatRunningPodsAreStable(testStorage.getNamespaceName(), KafkaConnectResources.deploymentName(testStorage.getClusterName()));
+        PodUtils.verifyThatRunningPodsAreStable(testStorage.getNamespaceName(), KafkaConnectResources.componentName(testStorage.getClusterName()));
 
         LOGGER.info("Verifying that KafkaConnect status is Ready because of same TLS version");
 
@@ -1299,8 +1072,8 @@ class SecurityST extends AbstractST {
     @ParallelNamespaceTest
     @Tag(CONNECT)
     @Tag(CONNECT_COMPONENTS)
-    void testKafkaAndKafkaConnectCipherSuites(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext);
+    void testKafkaAndKafkaConnectCipherSuites() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
         final Map<String, Object> configWithCipherSuitesSha384 = new HashMap<>();
 
         final String cipherSuitesSha384 = "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384";
@@ -1310,7 +1083,11 @@ class SecurityST extends AbstractST {
 
         LOGGER.info("Deploying Kafka cluster with the support {} cipher algorithms",  cipherSuitesSha384);
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(testStorage.getClusterName(), 3)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editSpec()
                 .editKafka()
                     .withConfig(configWithCipherSuitesSha384)
@@ -1329,7 +1106,7 @@ class SecurityST extends AbstractST {
 
         configWithCipherSuitesSha256.put(SslConfigs.SSL_CIPHER_SUITES_CONFIG, cipherSuitesSha256);
 
-        resourceManager.createResourceWithoutWait(extensionContext, KafkaConnectTemplates.kafkaConnect(testStorage.getClusterName(), testStorage.getNamespaceName(), 1)
+        resourceManager.createResourceWithoutWait(KafkaConnectTemplates.kafkaConnect(testStorage.getNamespaceName(), testStorage.getClusterName(), 1)
             .editSpec()
                 .withConfig(configWithCipherSuitesSha256)
             .endSpec()
@@ -1341,16 +1118,16 @@ class SecurityST extends AbstractST {
 
         LOGGER.info("Replacing KafkaConnect config to the cipher suites same as the Kafka Broker has");
 
-        KafkaConnectResource.replaceKafkaConnectResourceInSpecificNamespace(testStorage.getClusterName(), kafkaConnect -> kafkaConnect.getSpec().setConfig(configWithCipherSuitesSha384), testStorage.getNamespaceName());
+        KafkaConnectResource.replaceKafkaConnectResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getClusterName(), kafkaConnect -> kafkaConnect.getSpec().setConfig(configWithCipherSuitesSha384));
 
         LOGGER.info("Verifying that KafkaConnect has the accepted configuration:\n {} -> {}",
                 SslConfigs.SSL_CIPHER_SUITES_CONFIG, configsFromKafkaCustomResource.get(SslConfigs.SSL_CIPHER_SUITES_CONFIG));
 
-        KafkaConnectUtils.waitForKafkaConnectConfigChange(SslConfigs.SSL_CIPHER_SUITES_CONFIG, cipherSuitesSha384, testStorage.getNamespaceName(), testStorage.getClusterName());
+        KafkaConnectUtils.waitForKafkaConnectConfigChange(testStorage.getNamespaceName(), cipherSuitesSha384, SslConfigs.SSL_CIPHER_SUITES_CONFIG, testStorage.getClusterName());
 
         LOGGER.info("Verifying that KafkaConnect is stable");
 
-        PodUtils.verifyThatRunningPodsAreStable(testStorage.getNamespaceName(), KafkaConnectResources.deploymentName(testStorage.getClusterName()));
+        PodUtils.verifyThatRunningPodsAreStable(testStorage.getNamespaceName(), KafkaConnectResources.componentName(testStorage.getClusterName()));
 
         LOGGER.info("Verifying that KafkaConnect status is Ready because of the same cipher suites complexity of algorithm");
 
@@ -1358,14 +1135,18 @@ class SecurityST extends AbstractST {
     }
 
     @ParallelNamespaceTest
-    void testOwnerReferenceOfCASecrets(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext);
+    void testOwnerReferenceOfCASecrets() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
         /* Different name for Kafka cluster to make the test quicker -> KafkaRoller is waiting for pods of "my-cluster" to become ready
          for 5 minutes -> this will prevent the waiting. */
         final String secondClusterName = "my-second-cluster-" + testStorage.getClusterName();
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(testStorage.getClusterName(), 3)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editOrNewSpec()
                 .withNewClusterCa()
                     .withGenerateSecretOwnerReference(false)
@@ -1380,8 +1161,10 @@ class SecurityST extends AbstractST {
         List<Secret> caSecrets = kubeClient(testStorage.getNamespaceName()).listSecrets(testStorage.getNamespaceName()).stream()
             .filter(secret -> secret.getMetadata().getName().contains(KafkaResources.clusterCaKeySecretName(testStorage.getClusterName())) || secret.getMetadata().getName().contains(KafkaResources.clientsCaKeySecretName(testStorage.getClusterName()))).collect(Collectors.toList());
 
-        LOGGER.info("Deleting Kafka: {}", testStorage.getClusterName());
+        LOGGER.info("Deleting Kafka: {}/{}", testStorage.getNamespaceName(), testStorage.getClusterName());
         KafkaResource.kafkaClient().inNamespace(testStorage.getNamespaceName()).withName(testStorage.getClusterName()).withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
+        KafkaNodePoolUtils.deleteKafkaNodePoolWithPodSetAndWait(testStorage.getNamespaceName(), testStorage.getClusterName(), testStorage.getBrokerPoolName());
+        KafkaNodePoolUtils.deleteKafkaNodePoolWithPodSetAndWait(testStorage.getNamespaceName(), testStorage.getClusterName(), testStorage.getControllerPoolName());
         KafkaUtils.waitForKafkaDeletion(testStorage.getNamespaceName(), testStorage.getClusterName());
 
         LOGGER.info("Checking actual Secrets after Kafka deletion");
@@ -1395,7 +1178,11 @@ class SecurityST extends AbstractST {
         });
 
         LOGGER.info("Deploying Kafka with generateSecretOwnerReference set to true");
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(secondClusterName, 3)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), secondClusterName, 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), secondClusterName, 3).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), secondClusterName, 3)
             .editOrNewSpec()
                 .editOrNewClusterCa()
                     .withGenerateSecretOwnerReference(true)
@@ -1417,16 +1204,20 @@ class SecurityST extends AbstractST {
         caSecrets.forEach(caSecret -> {
             String secretName = caSecret.getMetadata().getName();
             LOGGER.info("Checking that Secret: {} is deleted", secretName);
-            TestUtils.waitFor("deletion of Secret: " + secretName, Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
+            TestUtils.waitFor("deletion of Secret: " + secretName, TestConstants.GLOBAL_POLL_INTERVAL, TestConstants.GLOBAL_TIMEOUT,
                 () -> kubeClient().getSecret(testStorage.getNamespaceName(), secretName) == null);
         });
     }
 
     @ParallelNamespaceTest
-    void testClusterCACertRenew(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
+    void testClusterCACertRenew() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(testStorage.getClusterName(), 3)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editOrNewSpec()
                 .withNewClusterCa()
                     .withRenewalDays(15)
@@ -1435,8 +1226,9 @@ class SecurityST extends AbstractST {
             .endSpec()
             .build());
 
-        final Map<String, String> zkPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getZookeeperSelector());
-        final Map<String, String> kafkaPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector());
+        String brokerPodName = kubeClient().listPods(testStorage.getNamespaceName(), testStorage.getBrokerSelector()).get(0).getMetadata().getName();
+        final Map<String, String> controllerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getControllerSelector());
+        final Map<String, String> brokerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector());
         final Map<String, String> eoPod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), testStorage.getEoDeploymentName());
 
         Secret clusterCASecret = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), KafkaResources.clusterCaCertificateSecretName(testStorage.getClusterName()));
@@ -1445,38 +1237,25 @@ class SecurityST extends AbstractST {
         Date initialCertEndTime = cacert.getNotAfter();
 
         // Check Broker kafka certificate dates
-        Secret brokerCertCreationSecret = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), testStorage.getClusterName() + "-kafka-brokers");
-        X509Certificate kafkaBrokerCert = SecretUtils.getCertificateFromSecret(brokerCertCreationSecret, KafkaResource.getKafkaPodName(testStorage.getClusterName(), 0) + ".crt");
+        Secret brokerCertCreationSecret = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), brokerPodName);
+        X509Certificate kafkaBrokerCert = SecretUtils.getCertificateFromSecret(brokerCertCreationSecret,
+            brokerPodName + ".crt");
         Date initialKafkaBrokerCertStartTime = kafkaBrokerCert.getNotBefore();
         Date initialKafkaBrokerCertEndTime = kafkaBrokerCert.getNotAfter();
-
-        Date initialZkCertStartTime = null;
-        Date initialZkCertEndTime = null;
-        Secret zkCertCreationSecret = null;
-        X509Certificate zkBrokerCert = null;
-        if (!Environment.isKRaftModeEnabled()) {
-            // Check Zookeeper certificate dates
-            zkCertCreationSecret = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), testStorage.getClusterName() + "-zookeeper-nodes");
-            zkBrokerCert = SecretUtils.getCertificateFromSecret(zkCertCreationSecret, testStorage.getClusterName() + "-zookeeper-0.crt");
-            initialZkCertStartTime = zkBrokerCert.getNotBefore();
-            initialZkCertEndTime = zkBrokerCert.getNotAfter();
-        }
 
         LOGGER.info("Change of Kafka validity and renewal days - reconciliation should start");
         CertificateAuthority newClusterCA = new CertificateAuthority();
         newClusterCA.setRenewalDays(150);
         newClusterCA.setValidityDays(200);
 
-        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getClusterName(), k -> k.getSpec().setClusterCa(newClusterCA), testStorage.getNamespaceName());
+        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getClusterName(), k -> k.getSpec().setClusterCa(newClusterCA));
 
         // On the next reconciliation, the Cluster Operator performs a `rolling update`:
-        //   a) ZooKeeper
-        //   b) Kafka
+        //   a) Controller pods
+        //   b) Broker pods
         //   c) and other components to trust the new Cluster CA certificate. (i.e., Entity Operator)
-        if (!Environment.isKRaftModeEnabled()) {
-            RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getZookeeperSelector(), 3, zkPods);
-        }
-        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getKafkaSelector(), 3, kafkaPods);
+        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getControllerSelector(), 3, controllerPods);
+        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getBrokerSelector(), 3, brokerPods);
         DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), testStorage.getEoDeploymentName(), 1, eoPod);
 
         // Read renewed secret/certs again
@@ -1486,8 +1265,8 @@ class SecurityST extends AbstractST {
         Date changedCertEndTime = cacert.getNotAfter();
 
         // Check renewed Broker kafka certificate dates
-        brokerCertCreationSecret = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), testStorage.getClusterName() + "-kafka-brokers");
-        kafkaBrokerCert = SecretUtils.getCertificateFromSecret(brokerCertCreationSecret, KafkaResource.getKafkaPodName(testStorage.getClusterName(), 0) + ".crt");
+        brokerCertCreationSecret = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), brokerPodName);
+        kafkaBrokerCert = SecretUtils.getCertificateFromSecret(brokerCertCreationSecret, brokerPodName + ".crt");
         Date changedKafkaBrokerCertStartTime = kafkaBrokerCert.getNotBefore();
         Date changedKafkaBrokerCertEndTime = kafkaBrokerCert.getNotAfter();
 
@@ -1503,29 +1282,17 @@ class SecurityST extends AbstractST {
                 initialKafkaBrokerCertStartTime.compareTo(changedKafkaBrokerCertStartTime) < 0);
         assertThat("Broker certificates end dates have not been renewed.",
                 initialKafkaBrokerCertEndTime.compareTo(changedKafkaBrokerCertEndTime) < 0);
-
-        if (!Environment.isKRaftModeEnabled()) {
-            // Check renewed Zookeeper certificate dates
-            zkCertCreationSecret = kubeClient(testStorage.getNamespaceName()).getSecret(testStorage.getNamespaceName(), testStorage.getClusterName() + "-zookeeper-nodes");
-            zkBrokerCert = SecretUtils.getCertificateFromSecret(zkCertCreationSecret, testStorage.getClusterName() + "-zookeeper-0.crt");
-            Date changedZkCertStartTime = zkBrokerCert.getNotBefore();
-            Date changedZkCertEndTime = zkBrokerCert.getNotAfter();
-
-            LOGGER.info("ZooKeeper cert creation dates: " + initialZkCertStartTime + " --> " + initialZkCertEndTime);
-            LOGGER.info("ZooKeeper cert changed dates:  " + changedZkCertStartTime + " --> " + changedZkCertEndTime);
-
-            assertThat("ZooKeeper certificates start dates have not been renewed.",
-                    initialZkCertStartTime.compareTo(changedZkCertStartTime) < 0);
-            assertThat("ZooKeeper certificates end dates have not been renewed.",
-                    initialZkCertEndTime.compareTo(changedZkCertEndTime) < 0);
-        }
     }
 
     @ParallelNamespaceTest
-    void testClientsCACertRenew(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
+    void testClientsCACertRenew() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaEphemeral(testStorage.getClusterName(), 3)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editOrNewSpec()
                 .withNewClientsCa()
                     .withRenewalDays(15)
@@ -1535,10 +1302,10 @@ class SecurityST extends AbstractST {
             .build());
 
         String username = "strimzi-tls-user-" + new Random().nextInt(Integer.MAX_VALUE);
-        resourceManager.createResourceWithWait(extensionContext, KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), testStorage.getClusterName(), username).build());
+        resourceManager.createResourceWithWait(KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), username, testStorage.getClusterName()).build());
 
-        final Map<String, String> zkPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getZookeeperSelector());
-        final Map<String, String> kafkaPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getKafkaSelector());
+        final Map<String, String> controllerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getControllerSelector());
+        final Map<String, String> brokerPods = PodUtils.podSnapshot(testStorage.getNamespaceName(), testStorage.getBrokerSelector());
         final Map<String, String> eoPod = DeploymentUtils.depSnapshot(testStorage.getNamespaceName(), testStorage.getEoDeploymentName());
 
         // Check initial clientsCA validity days
@@ -1557,17 +1324,14 @@ class SecurityST extends AbstractST {
         newClientsCA.setRenewalDays(150);
         newClientsCA.setValidityDays(200);
 
-        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getClusterName(), k -> k.getSpec().setClientsCa(newClientsCA), testStorage.getNamespaceName());
+        KafkaResource.replaceKafkaResourceInSpecificNamespace(testStorage.getNamespaceName(), testStorage.getClusterName(), k -> k.getSpec().setClientsCa(newClientsCA));
 
-        // On the next reconciliation, the Cluster Operator performs a `rolling update` only for the
-        // `Kafka pods`.
-        // a) ZooKeeper must not roll
-        if (!Environment.isKRaftModeEnabled()) {
-            RollingUpdateUtils.waitForNoRollingUpdate(testStorage.getNamespaceName(), testStorage.getZookeeperSelector(), zkPods);
-        }
+        // On the next reconciliation, the Cluster Operator performs a `rolling update`
+        // a) controllers have to roll
+        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getBrokerSelector(), 3, controllerPods);
 
-        // b) Kafka has to roll
-        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getKafkaSelector(), 3, kafkaPods);
+        // b) brokers have to roll
+        RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(testStorage.getNamespaceName(), testStorage.getBrokerSelector(), 3, brokerPods);
 
         // c) EO must roll (because User Operator uses Clients CA for issuing user certificates)
         DeploymentUtils.waitTillDepHasRolled(testStorage.getNamespaceName(), testStorage.getEoDeploymentName(), 1, eoPod);
@@ -1598,9 +1362,9 @@ class SecurityST extends AbstractST {
     }
 
     @BeforeAll
-    void setup(ExtensionContext extensionContext) {
+    void setup() {
         this.clusterOperator = this.clusterOperator
-                .defaultInstallation(extensionContext)
+                .defaultInstallation()
                 .createInstallation()
                 .runInstallation();
     }

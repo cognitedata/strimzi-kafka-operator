@@ -4,140 +4,78 @@
  */
 package io.strimzi.systemtest.cruisecontrol;
 
-import io.strimzi.api.kafka.model.KafkaRebalance;
+import io.skodjob.annotations.Desc;
+import io.skodjob.annotations.Label;
+import io.skodjob.annotations.Step;
+import io.skodjob.annotations.SuiteDoc;
+import io.skodjob.annotations.TestDoc;
 import io.strimzi.operator.common.model.cruisecontrol.CruiseControlEndpoints;
-import io.strimzi.operator.common.model.cruisecontrol.CruiseControlUserTaskStatus;
-import io.strimzi.operator.common.Annotations;
-import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.systemtest.AbstractST;
-import io.strimzi.systemtest.Environment;
-import io.strimzi.systemtest.annotations.KRaftWithoutUTONotSupported;
 import io.strimzi.systemtest.annotations.ParallelNamespaceTest;
+import io.strimzi.systemtest.docs.TestDocsLabels;
+import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.storage.TestStorage;
-import io.strimzi.systemtest.templates.crd.KafkaRebalanceTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaNodePoolTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
-import io.strimzi.systemtest.utils.kafkaUtils.KafkaRebalanceUtils;
+import io.strimzi.systemtest.templates.kubernetes.SecretTemplates;
 import io.strimzi.systemtest.utils.specific.CruiseControlUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.util.HashMap;
 import java.util.Map;
 
-import static io.strimzi.systemtest.Constants.ACCEPTANCE;
-import static io.strimzi.systemtest.Constants.CRUISE_CONTROL;
-import static io.strimzi.systemtest.Constants.REGRESSION;
+import static io.strimzi.systemtest.TestTags.CRUISE_CONTROL;
+import static io.strimzi.systemtest.TestTags.REGRESSION;
+import static io.strimzi.systemtest.utils.specific.CruiseControlUtils.CRUISE_CONTROL_DEFAULT_PORT;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 @Tag(REGRESSION)
 @Tag(CRUISE_CONTROL)
-@Tag(ACCEPTANCE)
+@SuiteDoc(
+    description = @Desc("This test suite verifies that Cruise Control's basic API requests function correctly"),
+    beforeTestSteps = {
+        @Step(value = "Deploy the Cluster Operator", expected = "Cluster Operator is deployed")
+    },
+    labels = {
+        @Label(value = TestDocsLabels.CRUISE_CONTROL),
+    }
+)
 public class CruiseControlApiST extends AbstractST {
 
     private static final Logger LOGGER = LogManager.getLogger(CruiseControlApiST.class);
     private static final String CRUISE_CONTROL_NAME = "Cruise Control";
-    private final String cruiseControlApiClusterName = "cruise-control-api-cluster-name";
 
     @ParallelNamespaceTest
-    @KRaftWithoutUTONotSupported()
-    void testCruiseControlBasicAPIRequests(ExtensionContext extensionContext)  {
-        final TestStorage testStorage = new TestStorage(extensionContext);
-
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaWithCruiseControl(testStorage.getClusterName(), 3, 3).build());
-
-        LOGGER.info("----> CRUISE CONTROL DEPLOYMENT STATE ENDPOINT <----");
-
-        String response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.POST, CruiseControlEndpoints.STATE,  CruiseControlUtils.SupportedSchemes.HTTPS, true);
-
-        assertThat(response, is("Unrecognized endpoint in request '/state'\n" +
-            "Supported POST endpoints: [ADD_BROKER, REMOVE_BROKER, FIX_OFFLINE_REPLICAS, REBALANCE, STOP_PROPOSAL_EXECUTION, PAUSE_SAMPLING, " +
-                "RESUME_SAMPLING, DEMOTE_BROKER, ADMIN, REVIEW, TOPIC_CONFIGURATION, RIGHTSIZE, REMOVE_DISKS]\n"));
-
-        response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.GET, CruiseControlEndpoints.STATE,  CruiseControlUtils.SupportedSchemes.HTTPS, true);
-
-        LOGGER.info("Verifying that {} REST API is available", CRUISE_CONTROL_NAME);
-
-        assertThat(response, not(containsString("404")));
-        assertThat(response, containsString("RUNNING"));
-        assertThat(response, containsString("NO_TASK_IN_PROGRESS"));
-
-        // https://github.com/strimzi/strimzi-kafka-operator/issues/8864
-        if (!Environment.isUnidirectionalTopicOperatorEnabled()) {
-            CruiseControlUtils.verifyThatCruiseControlTopicsArePresent(testStorage.getNamespaceName());
+    @TestDoc(
+        description = @Desc("Test that verifies Cruise Control's basic API requests function correctly with security features disabled."),
+        steps = {
+            @Step(value = "Create broker and controller KafkaNodePools", expected = "Both KafkaNodePools are successfully created"),
+            @Step(value = "Disable Cruise Control security and SSL in configuration", expected = "Configuration map is set with security and SSL disabled"),
+            @Step(value = "Create required Kafka and Cruise Control resources with disabled security", expected = "Kafka and Cruise Control resources are deployed without enabling security"),
+            @Step(value = "Call the Cruise Control state endpoint using HTTP without credentials", expected = "Cruise Control state response is received with HTTP status code 200"),
+            @Step(value = "Verify the Cruise Control state response", expected = "Response indicates Cruise Control is RUNNING with NO_TASK_IN_PROGRESS")
+        },
+        labels = {
+            @Label(value = TestDocsLabels.CRUISE_CONTROL),
         }
-        LOGGER.info("----> KAFKA REBALANCE <----");
-
-        response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.GET, CruiseControlEndpoints.REBALANCE,  CruiseControlUtils.SupportedSchemes.HTTPS, true);
-
-        assertThat(response, is("Unrecognized endpoint in request '/rebalance'\n" +
-            "Supported GET endpoints: [BOOTSTRAP, TRAIN, LOAD, PARTITION_LOAD, PROPOSALS, STATE, KAFKA_CLUSTER_STATE, USER_TASKS, REVIEW_BOARD]\n"));
-
-        LOGGER.info("Waiting for CC will have for enough metrics to be recorded to make a proposal ");
-        CruiseControlUtils.waitForRebalanceEndpointIsReady(testStorage.getNamespaceName());
-
-        response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.POST, CruiseControlEndpoints.REBALANCE,  CruiseControlUtils.SupportedSchemes.HTTPS, true);
-
-        // all goals stats that contains
-        assertCCGoalsInResponse(response);
-
-        assertThat(response, containsString("Cluster load after rebalance"));
-
-        LOGGER.info("----> EXECUTION OF STOP PROPOSAL <----");
-
-        response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.GET, CruiseControlEndpoints.STOP, CruiseControlUtils.SupportedSchemes.HTTPS, true);
-
-        assertThat(response, is("Unrecognized endpoint in request '/stop_proposal_execution'\n" +
-            "Supported GET endpoints: [BOOTSTRAP, TRAIN, LOAD, PARTITION_LOAD, PROPOSALS, STATE, KAFKA_CLUSTER_STATE, USER_TASKS, REVIEW_BOARD]\n"));
-
-        response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.POST, CruiseControlEndpoints.STOP, CruiseControlUtils.SupportedSchemes.HTTPS, true);
-
-        assertThat(response, containsString("Proposal execution stopped."));
-
-        LOGGER.info("----> USER TASKS <----");
-
-        response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.POST, CruiseControlEndpoints.USER_TASKS, CruiseControlUtils.SupportedSchemes.HTTPS, true);
-
-        assertThat(response, is("Unrecognized endpoint in request '/user_tasks'\n" +
-            "Supported POST endpoints: [ADD_BROKER, REMOVE_BROKER, FIX_OFFLINE_REPLICAS, REBALANCE, STOP_PROPOSAL_EXECUTION, PAUSE_SAMPLING, " +
-                "RESUME_SAMPLING, DEMOTE_BROKER, ADMIN, REVIEW, TOPIC_CONFIGURATION, RIGHTSIZE, REMOVE_DISKS]\n"));
-
-        response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.GET, CruiseControlEndpoints.USER_TASKS,  CruiseControlUtils.SupportedSchemes.HTTPS, true);
-
-        assertThat(response, containsString("GET"));
-        assertThat(response, containsString(CruiseControlEndpoints.STATE.toString()));
-        assertThat(response, containsString("POST"));
-        assertThat(response, containsString(CruiseControlEndpoints.REBALANCE.toString()));
-        assertThat(response, containsString(CruiseControlEndpoints.STOP.toString()));
-        assertThat(response, containsString(CruiseControlUserTaskStatus.COMPLETED.toString()));
-
-
-        LOGGER.info("Verifying that {} REST API doesn't allow HTTP requests", CRUISE_CONTROL_NAME);
-
-        response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.GET, CruiseControlEndpoints.STATE,  CruiseControlUtils.SupportedSchemes.HTTP, false);
-        assertThat(response, not(containsString("RUNNING")));
-        assertThat(response, not(containsString("NO_TASK_IN_PROGRESS")));
-
-        LOGGER.info("Verifying that {} REST API doesn't allow unauthenticated requests", CRUISE_CONTROL_NAME);
-
-        response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.GET, CruiseControlEndpoints.STATE,  CruiseControlUtils.SupportedSchemes.HTTPS, false);
-        assertThat(response, containsString("401 Unauthorized"));
-    }
-
-    @ParallelNamespaceTest
-    void testCruiseControlBasicAPIRequestsWithSecurityDisabled(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext);
+    )
+    void testCruiseControlBasicAPIRequestsWithSecurityDisabled() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
         Map<String, Object> config = new HashMap<>();
         config.put("webserver.security.enable", "false");
         config.put("webserver.ssl.enable", "false");
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaWithCruiseControl(cruiseControlApiClusterName, 3, 3)
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafkaWithCruiseControl(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
             .editOrNewSpec()
                 .withNewCruiseControl()
                     .withConfig(config)
@@ -146,87 +84,76 @@ public class CruiseControlApiST extends AbstractST {
             .build());
 
         LOGGER.info("----> CRUISE CONTROL DEPLOYMENT STATE ENDPOINT <----");
-
-        String response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.GET, CruiseControlEndpoints.STATE, CruiseControlUtils.SupportedSchemes.HTTP, false);
+        CruiseControlUtils.ApiResult response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.HttpMethod.GET,
+                CruiseControlUtils.Scheme.HTTP, CRUISE_CONTROL_DEFAULT_PORT, CruiseControlEndpoints.STATE.toString(), "");
+        String responseText = response.getResponseText();
+        int responseCode = response.getResponseCode();
 
         LOGGER.info("Verifying that {} REST API is available using HTTP request without credentials", CRUISE_CONTROL_NAME);
-
-        assertThat(response, not(containsString("404")));
-        assertThat(response, containsString("RUNNING"));
-        assertThat(response, containsString("NO_TASK_IN_PROGRESS"));
+        assertThat(responseCode, is(200));
+        assertThat(responseText, containsString("RUNNING"));
+        assertThat(responseText, containsString("NO_TASK_IN_PROGRESS"));
     }
 
     @ParallelNamespaceTest
-    void testCruiseControlAPIForScalingBrokersUpAndDown(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext);
+    @TestDoc(
+        description = @Desc("This test case verifies the creation and usage of Cruise Control's API users."),
+        steps = {
+            @Step(value = "Create broker and controller KafkaNodePools", expected = "Both KafkaNodePools are successfully created"),
+            @Step(value = "Create Secret containing the `arnost: heslo, USER` in the `.key` field", expected = "Secret is correctly created"),
+            @Step(value = "Deploy Kafka with Cruise Control containing configuration for the CC API users, with reference to the Secret (and its `.key` value) created in previous step", expected = "Kafka cluster with Cruise Control are deployed, the CC API users configuration is applied"),
+            @Step(value = "Do request to Cruise Control's API, specifically to `/state` endpoint with `arnost:heslo` user", expected = "Request is successful and response contains information about state of the Cruise Control")
+        },
+        labels = {
+            @Label(value = TestDocsLabels.CRUISE_CONTROL),
+        }
+    )
+    void testCruiseControlAPIUsers() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
+        final String ccApiUserSecretName = "cc-api-users";
+        final String ccApiUser = "arnost: heslo, USER\n";
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaWithCruiseControl(testStorage.getClusterName(), 5, 3).build());
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPool(testStorage.getNamespaceName(), testStorage.getBrokerPoolName(), testStorage.getClusterName(), 3).build(),
+            KafkaNodePoolTemplates.controllerPool(testStorage.getNamespaceName(), testStorage.getControllerPoolName(), testStorage.getClusterName(), 3).build()
+        );
+        resourceManager.createResourceWithWait(
+            SecretTemplates.secret(testStorage.getNamespaceName(), ccApiUserSecretName, "key", ccApiUser).build(),
+            KafkaTemplates.kafkaWithCruiseControl(testStorage.getNamespaceName(), testStorage.getClusterName(), 3)
+                .editOrNewSpec()
+                    .withNewCruiseControl()
+                        .withNewHashLoginServiceApiUsers()
+                            .withNewValueFrom()
+                                .withNewSecretKeyRef("key", ccApiUserSecretName, false)
+                            .endValueFrom()
+                        .endHashLoginServiceApiUsers()
+                    .endCruiseControl()
+                .endSpec()
+                .build()
+        );
 
-        LOGGER.info("Checking if we are able to execute GET request on {} and {} endpoints", CruiseControlEndpoints.ADD_BROKER, CruiseControlEndpoints.REMOVE_BROKER);
+        CruiseControlUtils.ApiResult response = CruiseControlUtils.callApi(
+            testStorage.getNamespaceName(),
+            CruiseControlUtils.HttpMethod.GET,
+            CruiseControlUtils.Scheme.HTTPS,
+            CRUISE_CONTROL_DEFAULT_PORT,
+            CruiseControlEndpoints.STATE.toString(),
+            "",
+            "arnost:heslo"
+        );
 
-        String response = CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.GET, CruiseControlEndpoints.ADD_BROKER,  CruiseControlUtils.SupportedSchemes.HTTPS, true);
+        String responseText = response.getResponseText();
+        int responseCode = response.getResponseCode();
 
-        assertThat(response, is("Unrecognized endpoint in request '/add_broker'\n" +
-            "Supported GET endpoints: [BOOTSTRAP, TRAIN, LOAD, PARTITION_LOAD, PROPOSALS, STATE, KAFKA_CLUSTER_STATE, USER_TASKS, REVIEW_BOARD]\n"));
-
-        response =  CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.GET, CruiseControlEndpoints.REMOVE_BROKER,  CruiseControlUtils.SupportedSchemes.HTTPS, true);
-
-        assertThat(response, is("Unrecognized endpoint in request '/remove_broker'\n" +
-            "Supported GET endpoints: [BOOTSTRAP, TRAIN, LOAD, PARTITION_LOAD, PROPOSALS, STATE, KAFKA_CLUSTER_STATE, USER_TASKS, REVIEW_BOARD]\n"));
-
-        LOGGER.info("Waiting for CC will have for enough metrics to be recorded to make a proposal ");
-        CruiseControlUtils.waitForRebalanceEndpointIsReady(testStorage.getNamespaceName());
-
-        response =  CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.POST, CruiseControlEndpoints.ADD_BROKER,  CruiseControlUtils.SupportedSchemes.HTTPS, true, "?brokerid=3,4");
-
-        assertCCGoalsInResponse(response);
-        assertThat(response, containsString("Cluster load after adding broker [3, 4]"));
-
-        response =  CruiseControlUtils.callApi(testStorage.getNamespaceName(), CruiseControlUtils.SupportedHttpMethods.POST, CruiseControlEndpoints.REMOVE_BROKER,  CruiseControlUtils.SupportedSchemes.HTTPS, true, "?brokerid=3,4");
-
-        assertCCGoalsInResponse(response);
-        assertThat(response, containsString("Cluster load after removing broker [3, 4]"));
-    }
-
-    @ParallelNamespaceTest
-    void testKafkaRebalanceAutoApprovalMechanism(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext);
-
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaWithCruiseControl(testStorage.getClusterName(), 3, 3).build());
-
-        // KafkaRebalance with auto-approval
-        resourceManager.createResourceWithWait(extensionContext, KafkaRebalanceTemplates.kafkaRebalance(testStorage.getClusterName())
-            .editMetadata()
-                .addToAnnotations(Annotations.ANNO_STRIMZI_IO_REBALANCE_AUTOAPPROVAL, "true")
-            .endMetadata()
-            .build());
-
-        KafkaRebalanceUtils.doRebalancingProcessWithAutoApproval(new Reconciliation("test", KafkaRebalance.RESOURCE_KIND,
-            testStorage.getNamespaceName(), testStorage.getClusterName()), testStorage.getNamespaceName(), testStorage.getClusterName());
-    }
-
-    private void assertCCGoalsInResponse(String response) {
-        assertThat(response, containsString("RackAwareGoal"));
-        assertThat(response, containsString("ReplicaCapacityGoal"));
-        assertThat(response, containsString("DiskCapacityGoal"));
-        assertThat(response, containsString("NetworkInboundCapacityGoal"));
-        assertThat(response, containsString("NetworkOutboundCapacityGoal"));
-        assertThat(response, containsString("CpuCapacityGoal"));
-        assertThat(response, containsString("ReplicaDistributionGoal"));
-        assertThat(response, containsString("DiskUsageDistributionGoal"));
-        assertThat(response, containsString("NetworkInboundUsageDistributionGoal"));
-        assertThat(response, containsString("NetworkOutboundUsageDistributionGoal"));
-        assertThat(response, containsString("CpuUsageDistributionGoal"));
-        assertThat(response, containsString("TopicReplicaDistributionGoal"));
-        assertThat(response, containsString("LeaderReplicaDistributionGoal"));
-        assertThat(response, containsString("LeaderBytesInDistributionGoal"));
-        assertThat(response, containsString("PreferredLeaderElectionGoal"));
+        assertThat(responseCode, is(200));
+        assertThat(responseText, containsString("RUNNING"));
+        assertThat(responseText, containsString("NO_TASK_IN_PROGRESS"));
     }
 
     @BeforeAll
-    void setUp(final ExtensionContext extensionContext) {
+    void setUp() {
         this.clusterOperator = this.clusterOperator
-            .defaultInstallation(extensionContext)
+            .defaultInstallation()
             .createInstallation()
             .runInstallation();
     }

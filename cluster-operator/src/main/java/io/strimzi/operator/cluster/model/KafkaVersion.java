@@ -19,9 +19,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
 /**
@@ -82,31 +82,27 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
         private final KafkaVersion defaultVersion;
         private final Map<String, String> kafkaImages;
         private final Map<String, String> kafkaConnectImages;
-        private final Map<String, String> kafkaMirrorMakerImages;
         private final Map<String, String> kafkaMirrorMaker2Images;
 
         /**
          * Constructor
          *
-         * @param kafkaImages               Map with container images for various Kafka versions to be used for Kafka brokers and ZooKeeper
+         * @param kafkaImages               Map with container images for various Kafka versions to be used for Kafka brokers
          * @param kafkaConnectImages        Map with container images for various Kafka versions to be used for Kafka Connect
-         * @param kafkaMirrorMakerImages    Map with container images for various Kafka versions to be used for Kafka Mirror Maker
          * @param kafkaMirrorMaker2Images   Map with container images for various Kafka versions to be used for Kafka Mirror Maker 2
          */
         public Lookup(Map<String, String> kafkaImages,
                       Map<String, String> kafkaConnectImages,
-                      Map<String, String> kafkaMirrorMakerImages,
                       Map<String, String> kafkaMirrorMaker2Images) {
             this(new InputStreamReader(
                     KafkaVersion.class.getResourceAsStream("/" + KAFKA_VERSIONS_RESOURCE),
                     StandardCharsets.UTF_8),
-                    kafkaImages, kafkaConnectImages, kafkaMirrorMakerImages, kafkaMirrorMaker2Images);
+                    kafkaImages, kafkaConnectImages, kafkaMirrorMaker2Images);
         }
 
         protected Lookup(Reader reader,
                          Map<String, String> kafkaImages,
                          Map<String, String> kafkaConnectImages,
-                         Map<String, String> kafkaMirrorMakerImages,
                          Map<String, String> kafkaMirrorMaker2Images) {
             map = new HashMap<>();
             try {
@@ -116,7 +112,6 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
             }
             this.kafkaImages = kafkaImages;
             this.kafkaConnectImages = kafkaConnectImages;
-            this.kafkaMirrorMakerImages = kafkaMirrorMakerImages;
             this.kafkaMirrorMaker2Images = kafkaMirrorMaker2Images;
         }
 
@@ -302,24 +297,6 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
             validateImages(versions, kafkaConnectImages);
         }
 
-        /**
-         * The Kafka Connect image to use for a Kafka Mirror Maker cluster.
-         * @param image The image given in the CR.
-         * @param version The version given in the CR.
-         * @return The image to use.
-         * @throws InvalidResourceException If no image was given in the CR and the version given
-         * was not present in {@link ClusterOperatorConfig#STRIMZI_KAFKA_MIRROR_MAKER_IMAGES}.
-         */
-        public String kafkaMirrorMakerImage(String image, String version) {
-            try {
-                return image(image,
-                        version,
-                        kafkaMirrorMakerImages);
-            } catch (NoImageException e) {
-                throw asInvalidResourceException(version, e);
-            }
-        }
-
         InvalidResourceException asInvalidResourceException(String version, NoImageException e) {
             return new InvalidResourceException("Kafka version " + version + " is not supported. " +
                     "Supported versions are: " + String.join(", ", supportedVersions()) + ".",
@@ -327,16 +304,6 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
         }
 
         /**
-         * Validate that the given versions have images present in {@link ClusterOperatorConfig#STRIMZI_KAFKA_MIRROR_MAKER_IMAGES}.
-         * @param versions The versions to validate.
-         * @throws NoImageException If one of the versions lacks an image.
-         * @throws UnsupportedVersionException If any version with configured image is not supported
-         */
-        public void validateKafkaMirrorMakerImages(Set<String> versions) throws NoImageException, UnsupportedVersionException {
-            validateImages(versions, kafkaMirrorMakerImages);
-        }
-
-       /**
          * The Kafka MirrorMaker 2 image to use for a Kafka MirrorMaker 2 cluster.
          * @param image The image given in the CR.
          * @param version The version given in the CR.
@@ -379,7 +346,6 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
                         .append(" msg: ").append(version.messageVersion)
                         .append(" kafka-image: ").append(kafkaImages.get(v))
                         .append(" connect-image: ").append(kafkaConnectImages.get(v))
-                        .append(" mirrormaker-image: ").append(kafkaMirrorMakerImages.get(v))
                         .append(" mirrormaker2-image: ").append(kafkaMirrorMaker2Images.get(v))
                         .append("}");
 
@@ -406,7 +372,7 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
     private final String version;
     private final String protocolVersion;
     private final String messageVersion;
-    private final String zookeeperVersion;
+    private final String metadataVersion;
     private final boolean isDefault;
     private final boolean isSupported;
     private final String unsupportedFeatures;
@@ -417,7 +383,7 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
      * @param version               Kafka version
      * @param protocolVersion       Inter-broker protocol version
      * @param messageVersion        Log message format version
-     * @param zookeeperVersion      ZooKeeper version
+     * @param metadataVersion       KRaft Metadata version
      * @param isDefault             Flag indicating if this Kafka version is default
      * @param isSupported           Flag indicating if this Kafka version is supported by this operator version
      * @param unsupportedFeatures   Unsupported features
@@ -426,7 +392,7 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
     public KafkaVersion(@JsonProperty("version") String version,
                         @JsonProperty("protocol") String protocolVersion,
                         @JsonProperty("format") String messageVersion,
-                        @JsonProperty("zookeeper") String zookeeperVersion,
+                        @JsonProperty("metadata") String metadataVersion,
                         @JsonProperty("default") boolean isDefault,
                         @JsonProperty("supported") boolean isSupported,
                         @JsonProperty("unsupported-features") String unsupportedFeatures) {
@@ -434,7 +400,7 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
         this.version = version;
         this.protocolVersion = protocolVersion;
         this.messageVersion = messageVersion;
-        this.zookeeperVersion = zookeeperVersion;
+        this.metadataVersion = metadataVersion;
         this.isDefault = isDefault;
         this.isSupported = isSupported;
         this.unsupportedFeatures = unsupportedFeatures;
@@ -446,7 +412,7 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
                 "version='" + version + '\'' +
                 ", protocolVersion='" + protocolVersion + '\'' +
                 ", messageVersion='" + messageVersion + '\'' +
-                ", zookeeperVersion='" + zookeeperVersion + '\'' +
+                ", metadataVersion='" + metadataVersion + '\'' +
                 ", isDefault=" + isDefault +
                 ", isSupported=" + isSupported +
                 ", unsupportedFeatures='" + unsupportedFeatures  + '\'' +
@@ -475,10 +441,10 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
     }
 
     /**
-     * @return  ZooKeeper version
+     * @return  KRaft metadata version
      */
-    public String zookeeperVersion() {
-        return zookeeperVersion;
+    public String metadataVersion() {
+        return metadataVersion;
     }
 
     /**

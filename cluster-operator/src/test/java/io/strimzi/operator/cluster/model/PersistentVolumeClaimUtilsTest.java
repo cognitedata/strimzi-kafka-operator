@@ -8,15 +8,15 @@ import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 import io.fabric8.kubernetes.api.model.Quantity;
-import io.strimzi.api.kafka.model.storage.EphemeralStorage;
-import io.strimzi.api.kafka.model.storage.JbodStorage;
-import io.strimzi.api.kafka.model.storage.JbodStorageBuilder;
-import io.strimzi.api.kafka.model.storage.PersistentClaimStorage;
-import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
-import io.strimzi.api.kafka.model.storage.PersistentClaimStorageOverrideBuilder;
-import io.strimzi.api.kafka.model.storage.Storage;
-import io.strimzi.api.kafka.model.template.ResourceTemplate;
-import io.strimzi.api.kafka.model.template.ResourceTemplateBuilder;
+import io.strimzi.api.kafka.model.common.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.common.template.ResourceTemplateBuilder;
+import io.strimzi.api.kafka.model.kafka.EphemeralStorage;
+import io.strimzi.api.kafka.model.kafka.JbodStorage;
+import io.strimzi.api.kafka.model.kafka.JbodStorageBuilder;
+import io.strimzi.api.kafka.model.kafka.PersistentClaimStorage;
+import io.strimzi.api.kafka.model.kafka.PersistentClaimStorageBuilder;
+import io.strimzi.api.kafka.model.kafka.PersistentClaimStorageOverrideBuilder;
+import io.strimzi.api.kafka.model.kafka.Storage;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.test.annotations.ParallelSuite;
 import io.strimzi.test.annotations.ParallelTest;
@@ -250,7 +250,7 @@ public class PersistentVolumeClaimUtilsTest {
                         .withId(0)
                         .withStorageClass("my-storage-class")
                         .withSize("100Gi")
-                        .withOverrides(new PersistentClaimStorageOverrideBuilder().withBroker(0).withStorageClass("special-storage-class").build())
+                        .withOverrides(new PersistentClaimStorageOverrideBuilder().withBroker(0).withStorageClass("special-storage-class").build()) // The override is set, but the test checks that it is ignored
                         .build())
                 .build();
 
@@ -268,7 +268,7 @@ public class PersistentVolumeClaimUtilsTest {
         assertThat(pvcs.get(0).getSpec().getAccessModes(), is(List.of("ReadWriteOnce")));
         assertThat(pvcs.get(0).getSpec().getSelector(), is(nullValue()));
         assertThat(pvcs.get(0).getSpec().getResources().getRequests(), is(Map.of("storage", new Quantity("100Gi", null))));
-        assertThat(pvcs.get(0).getSpec().getStorageClassName(), is("special-storage-class"));
+        assertThat(pvcs.get(0).getSpec().getStorageClassName(), is("my-storage-class"));
     }
 
     @ParallelTest
@@ -280,7 +280,7 @@ public class PersistentVolumeClaimUtilsTest {
                                 .withStorageClass("my-storage-class")
                                 .withSize("100Gi")
                                 .withDeleteClaim(false)
-                                .withOverrides(new PersistentClaimStorageOverrideBuilder().withBroker(0).withStorageClass("special-storage-class").build())
+                                .withOverrides(new PersistentClaimStorageOverrideBuilder().withBroker(0).withStorageClass("special-storage-class").build()) // The override is set, but the test checks that it is ignored
                                 .build(),
                         new PersistentClaimStorageBuilder()
                                 .withId(1)
@@ -306,7 +306,7 @@ public class PersistentVolumeClaimUtilsTest {
             assertThat(pvcs.get(i).getSpec().getAccessModes(), is(List.of("ReadWriteOnce")));
             assertThat(pvcs.get(i).getSpec().getSelector(), is(nullValue()));
             assertThat(pvcs.get(i).getSpec().getResources().getRequests(), is(Map.of("storage", new Quantity("100Gi", null))));
-            assertThat(pvcs.get(i).getSpec().getStorageClassName(), is(i == 0 ? "special-storage-class" : "my-storage-class"));
+            assertThat(pvcs.get(i).getSpec().getStorageClassName(), is("my-storage-class"));
         }
 
         for (int i = 3; i < 6; i++)  {

@@ -4,76 +4,77 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.dsl.Resource;
-import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.KafkaRebalanceList;
-import io.strimzi.api.kafka.model.CruiseControlResources;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaRebalance;
-import io.strimzi.api.kafka.model.KafkaRebalanceBuilder;
-import io.strimzi.api.kafka.model.KafkaRebalanceSpec;
-import io.strimzi.api.kafka.model.balancing.KafkaRebalanceAnnotation;
-import io.strimzi.api.kafka.model.balancing.KafkaRebalanceMode;
-import io.strimzi.api.kafka.model.balancing.KafkaRebalanceState;
-import io.strimzi.api.kafka.model.status.Condition;
-import io.strimzi.api.kafka.model.status.KafkaRebalanceStatus;
-import io.strimzi.api.kafka.model.status.KafkaRebalanceStatusBuilder;
-import io.strimzi.api.kafka.model.storage.JbodStorage;
+import io.strimzi.api.kafka.model.common.Condition;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaList;
+import io.strimzi.api.kafka.model.kafka.cruisecontrol.CruiseControlResources;
+import io.strimzi.api.kafka.model.rebalance.BrokerAndVolumeIds;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalance;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceAnnotation;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceBuilder;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceList;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceMode;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceSpec;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceState;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceStatus;
+import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceStatusBuilder;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.model.CruiseControl;
-import io.strimzi.operator.cluster.model.CruiseControlConfiguration;
-import io.strimzi.operator.common.model.InvalidResourceException;
 import io.strimzi.operator.cluster.model.ModelUtils;
 import io.strimzi.operator.cluster.model.NoSuchResourceException;
-import io.strimzi.operator.common.model.StatusDiff;
+import io.strimzi.operator.cluster.model.cruisecontrol.CruiseControlConfiguration;
+import io.strimzi.operator.cluster.operator.VertxUtil;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.AbstractRebalanceOptions;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.AddBrokerOptions;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlApi;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlApiImpl;
-import io.strimzi.operator.common.model.cruisecontrol.CruiseControlLoadParameters;
-import io.strimzi.operator.common.model.cruisecontrol.CruiseControlRebalanceKeys;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlRebalanceResponse;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlRestException;
-import io.strimzi.operator.common.model.cruisecontrol.CruiseControlUserTaskStatus;
+import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlUserTasksResponse;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.RebalanceOptions;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.RemoveBrokerOptions;
+import io.strimzi.operator.cluster.operator.resource.cruisecontrol.RemoveDisksOptions;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.AbstractWatchableStatusedNamespacedResourceOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ConfigMapOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.CrdOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.SecretOperator;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
-import io.strimzi.operator.common.VertxUtil;
+import io.strimzi.operator.common.model.InvalidResourceException;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.resource.AbstractWatchableStatusedNamespacedResourceOperator;
-import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
-import io.strimzi.operator.common.operator.resource.CrdOperator;
-import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.model.StatusUtils;
+import io.strimzi.operator.common.model.cruisecontrol.CruiseControlLoadParameters;
+import io.strimzi.operator.common.model.cruisecontrol.CruiseControlRebalanceKeys;
+import io.strimzi.operator.common.model.cruisecontrol.CruiseControlUserTaskStatus;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
-import io.vertx.core.json.JsonArray;
-import io.vertx.core.json.JsonObject;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static io.strimzi.api.ResourceAnnotations.ANNO_STRIMZI_IO_REBALANCE_TEMPLATE;
 import static io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlApiImpl.HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS;
 import static io.strimzi.operator.common.Annotations.ANNO_STRIMZI_IO_REBALANCE;
 import static io.strimzi.operator.common.Annotations.ANNO_STRIMZI_IO_REBALANCE_AUTOAPPROVAL;
@@ -145,39 +146,50 @@ import static io.strimzi.operator.common.Annotations.ANNO_STRIMZI_IO_REBALANCE_A
  *    |-----------→|               |                   |
  * </code></pre>
  */
-@SuppressWarnings({"checkstyle:ClassFanOutComplexity"})
+@SuppressWarnings({"checkstyle:ClassFanOutComplexity", "checkstyle:CyclomaticComplexity"})
 public class KafkaRebalanceAssemblyOperator
        extends AbstractOperator<KafkaRebalance, KafkaRebalanceSpec, KafkaRebalanceStatus, AbstractWatchableStatusedNamespacedResourceOperator<KubernetesClient, KafkaRebalance, KafkaRebalanceList, Resource<KafkaRebalance>>> {
 
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaRebalanceAssemblyOperator.class.getName());
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    private static final long REBALANCE_POLLING_TIMER_MS = 5_000;
-    private static final int MAX_API_RETRIES = 5;
-    protected static final String BROKER_LOAD_KEY = "brokerLoad.json";
+    /* test */ static final String BROKER_LOAD_KEY = "brokerLoad.json";
     private final CrdOperator<KubernetesClient, KafkaRebalance, KafkaRebalanceList> kafkaRebalanceOperator;
     private final CrdOperator<KubernetesClient, Kafka, KafkaList> kafkaOperator;
     private final SecretOperator secretOperations;
     private final LabelSelector kafkaSelector;
-    private boolean usingJbodStorage;
-
     private final ConfigMapOperator configMapOperator;
+    private final int cruiseControlPort;
+
     /**
      * @param vertx The Vertx instance
      * @param supplier Supplies the operators for different resources
      * @param config Cluster Operator configuration
      */
     public KafkaRebalanceAssemblyOperator(Vertx vertx,
-                                          ResourceOperatorSupplier supplier, ClusterOperatorConfig config) {
+                                          ResourceOperatorSupplier supplier,
+                                          ClusterOperatorConfig config) {
+        this(vertx, supplier, config, CruiseControl.REST_API_PORT);
+    }
+    
+    /**
+     * @param vertx The Vertx instance
+     * @param supplier Supplies the operators for different resources
+     * @param config Cluster Operator configuration
+     * @param cruiseControlPort Cruise Control server port
+     */
+    /* test */ KafkaRebalanceAssemblyOperator(Vertx vertx,
+                                              ResourceOperatorSupplier supplier, 
+                                              ClusterOperatorConfig config,
+                                              int cruiseControlPort) {
         super(vertx, KafkaRebalance.RESOURCE_KIND, supplier.kafkaRebalanceOperator, supplier.metricsProvider, null);
-        this.kafkaSelector = (config.getCustomResourceSelector() == null || config.getCustomResourceSelector().toMap().isEmpty()) ? null : new LabelSelector(null, config.getCustomResourceSelector().toMap());
+        this.kafkaSelector = (config.getCustomResourceSelector() == null || config.getCustomResourceSelector().toMap().isEmpty()) 
+            ? null : new LabelSelector(null, config.getCustomResourceSelector().toMap());
         this.kafkaRebalanceOperator = supplier.kafkaRebalanceOperator;
         this.kafkaOperator = supplier.kafkaOperator;
         this.configMapOperator = supplier.configMapOperations;
         this.secretOperations = supplier.secretOperations;
-    }
-
-    protected long rebalancePollingTimerDelay() {
-        return REBALANCE_POLLING_TIMER_MS;
+        this.cruiseControlPort = cruiseControlPort;
     }
 
     /**
@@ -191,7 +203,7 @@ public class KafkaRebalanceAssemblyOperator
      */
     public CruiseControlApi cruiseControlClientProvider(Secret ccSecret, Secret ccApiSecret,
                                                            boolean apiAuthEnabled, boolean apiSslEnabled) {
-        return new CruiseControlApiImpl(vertx, HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS, ccSecret, ccApiSecret, apiAuthEnabled, apiSslEnabled);
+        return new CruiseControlApiImpl(HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS, ccSecret, ccApiSecret, apiAuthEnabled, apiSslEnabled);
     }
 
     /**
@@ -205,98 +217,13 @@ public class KafkaRebalanceAssemblyOperator
         return CruiseControlResources.qualifiedServiceName(clusterName, clusterNamespace);
     }
 
-    /**
-     * Create Kubernetes watch for KafkaRebalance resources. KafkaRebalance resources have special event handler, so
-     * this method overrides the createWatch method from AbstractOperator class which is used by all other assembly
-     * operators.
-     *
-     * @param namespace     Namespace where to watch for KafkaRebalance resources
-     *
-     * @return  A future which completes when the watcher has been created.
-     */
-    @Override
-    public Future<ReconnectingWatcher<KafkaRebalance>> createWatch(String namespace) {
-        return VertxUtil.async(vertx, () -> new ReconnectingWatcher<>(resourceOperator, KafkaRebalance.RESOURCE_KIND, namespace, selector(), this::eventHandler));
-    }
-
-    /**
-     * Event handler called when the KafkaRebalance watch receives an event.
-     *
-     * @param action    An Action describing the type of the event
-     * @param resource  The resource for which the event was triggered
-     */
-    private void eventHandler(Watcher.Action action, KafkaRebalance resource) {
-        Reconciliation reconciliation = new Reconciliation("kafkarebalance-watch", resource.getKind(),
-                resource.getMetadata().getNamespace(), resource.getMetadata().getName());
-
-        LOGGER.debugCr(reconciliation, "EventReceived {} on {} with status [{}] and {}={}",
-                action,
-                resource.getMetadata().getName(),
-                resource.getStatus() != null ? rebalanceStateConditionType(resource.getStatus()) : null,
-                ANNO_STRIMZI_IO_REBALANCE, rawRebalanceAnnotation(resource));
-
-        withLock(reconciliation, LOCK_TIMEOUT_MS,
-                () -> reconcileRebalance(reconciliation, action == Watcher.Action.DELETED ? null : resource));
-    }
-
-    /**
-     * Searches through the conditions in the supplied status instance and finds those whose type matches one of the values defined
-     * in the {@link KafkaRebalanceState} enum.
-     * If there are none it will return null.
-     * If there is only one it will return that Condition.
-     * If there are more than one it will throw a RuntimeException.
-     *
-     * @param status The KafkaRebalanceStatus instance whose conditions will be searched.
-     * @return The Condition instance from the supplied status that has a type value matching one of the values of the
-     *         {@link KafkaRebalanceState} enum. If none are found then the method will return null.
-     * @throws RuntimeException If there is more than one Condition instance in the supplied status whose type matches one of the
-     *                          {@link KafkaRebalanceState} enum values.
-     */
-    /* test */ protected Condition rebalanceStateCondition(KafkaRebalanceStatus status) {
-        if (status.getConditions() != null) {
-
-            List<Condition> statusConditions = status.getConditions()
-                    .stream()
-                    .filter(condition -> condition.getType() != null)
-                    .filter(condition -> Arrays.stream(KafkaRebalanceState.values())
-                            .anyMatch(stateValue -> stateValue.toString().equals(condition.getType())))
-                    .toList();
-
-            if (statusConditions.size() == 1) {
-                return statusConditions.get(0);
-            } else if (statusConditions.size() > 1) {
-                throw new RuntimeException("Multiple KafkaRebalance State Conditions were present in the KafkaRebalance status");
-            }
-        }
-        // If there are no conditions or none that have the correct status
-        return null;
-    }
-
-    /**
-     * Searches through the conditions in the supplied status instance and finds those whose type matches one of the values defined
-     * in the {@link KafkaRebalanceState} enum.
-     * If there are none it will return null.
-     * If there are more than one it will throw a RuntimeException.
-     * If there is only one it will return that Condition's type as a string.
-     *
-     * @param status The status instance whose conditions will be searched.
-     * @return The type of the rebalance status condition.
-     * @throws RuntimeException If there is more than one Condition instance in the supplied status whose type matches one of the
-     *                          {@link KafkaRebalanceState} enum values.
-     */
-    private String rebalanceStateConditionType(KafkaRebalanceStatus status) {
-        Condition rebalanceStateCondition = rebalanceStateCondition(status);
-        return rebalanceStateCondition != null ? rebalanceStateCondition.getType() : null;
-    }
-
-    private Future<KafkaRebalance> updateStatus(Reconciliation reconciliation,
-                                                KafkaRebalance kafkaRebalance,
-                                                KafkaRebalanceStatus desiredStatus,
-                                                Throwable e) {
+    private KafkaRebalanceStatus updateStatus(KafkaRebalance kafkaRebalance,
+                                              KafkaRebalanceStatus desiredStatus,
+                                              Throwable e) {
         // Leave the current status when the desired state is null
         if (desiredStatus != null) {
 
-            Condition cond = rebalanceStateCondition(desiredStatus);
+            Condition cond = KafkaRebalanceUtils.rebalanceStateCondition(desiredStatus);
 
             List<Condition> previous = Collections.emptyList();
             if (desiredStatus.getConditions() != null) {
@@ -313,14 +240,9 @@ public class KafkaRebalanceAssemblyOperator
             } else {
                 throw new IllegalArgumentException("Status related exception and the Status condition's type cannot both be null");
             }
-
-            StatusDiff diff = new StatusDiff(kafkaRebalance.getStatus(), desiredStatus);
-            if (!diff.isEmpty()) {
-                return kafkaRebalanceOperator
-                        .updateStatusAsync(reconciliation, new KafkaRebalanceBuilder(kafkaRebalance).withStatus(desiredStatus).build());
-            }
+            return desiredStatus;
         }
-        return Future.succeededFuture(kafkaRebalance);
+        return kafkaRebalance.getStatus();
     }
 
     /* test */ AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> convertRebalanceSpecToRebalanceOptions(KafkaRebalanceSpec kafkaRebalanceSpec) {
@@ -332,6 +254,9 @@ public class KafkaRebalanceAssemblyOperator
                 .orElse(KafkaRebalanceMode.FULL);
         List<Integer> brokers = Optional.ofNullable(kafkaRebalanceSpec)
                 .map(kr -> kr.getBrokers())
+                .orElse(null);
+        List<BrokerAndVolumeIds> brokerAndVolumeIds = Optional.ofNullable(kafkaRebalanceSpec)
+                .map(kr -> kr.getMoveReplicasOffVolumes())
                 .orElse(null);
 
         switch (mode) {
@@ -349,6 +274,14 @@ public class KafkaRebalanceAssemblyOperator
                     ((RemoveBrokerOptions.RemoveBrokerOptionsBuilder) rebalanceOptionsBuilder).withBrokers(brokers);
                 } else {
                     throw new IllegalArgumentException("The brokers list is mandatory when using the " + mode.toValue() + " rebalancing mode");
+                }
+                break;
+            case REMOVE_DISKS:
+                rebalanceOptionsBuilder = new RemoveDisksOptions.RemoveDisksOptionsBuilder();
+                if (brokerAndVolumeIds != null && !brokerAndVolumeIds.isEmpty()) {
+                    ((RemoveDisksOptions.RemoveDisksOptionsBuilder) rebalanceOptionsBuilder).withBrokersandVolumeIds(brokerAndVolumeIds);
+                } else {
+                    throw new IllegalArgumentException("The brokers and volume IDs list is mandatory when using the " + mode.toValue() + " rebalancing mode");
                 }
                 break;
             default:
@@ -391,13 +324,12 @@ public class KafkaRebalanceAssemblyOperator
         return rebalanceOptionsBuilder;
     }
 
-    private Future<Void> reconcile(Reconciliation reconciliation, String host,
-                                   CruiseControlApi apiClient, KafkaRebalance kafkaRebalance,
-                                   KafkaRebalanceState currentState, KafkaRebalanceAnnotation rebalanceAnnotation) {
-
+    private Future<KafkaRebalanceStatus> handleRebalance(Reconciliation reconciliation, String host,
+                                                         CruiseControlApi apiClient, KafkaRebalance kafkaRebalance,
+                                                         KafkaRebalanceState currentState) {
 
         if (kafkaRebalance != null && kafkaRebalance.getStatus() != null
-                && "Ready".equals(rebalanceStateConditionType(kafkaRebalance.getStatus()))
+                && KafkaRebalanceUtils.rebalanceState(kafkaRebalance.getStatus()) == KafkaRebalanceState.Ready
                 && rawRebalanceAnnotation(kafkaRebalance) == null) {
             LOGGER.infoCr(reconciliation, "Rebalancing is completed. You can use the `refresh` annotation to ask for a new rebalance request");
         } else {
@@ -412,82 +344,65 @@ public class KafkaRebalanceAssemblyOperator
             unknownAndDeprecatedConditions.add(StatusUtils.getPausedCondition());
             status.setConditions(new ArrayList<>(unknownAndDeprecatedConditions));
 
-            return updateStatus(reconciliation, kafkaRebalance, status, null).compose(i -> Future.succeededFuture());
+            return Future.succeededFuture(updateStatus(kafkaRebalance, status, null));
         }
 
-        if (kafkaRebalance.getSpec().isRebalanceDisk() && !usingJbodStorage) {
-            String error = "Cannot set rebalanceDisk=true for Kafka clusters with a non-JBOD storage config. " +
-                "Intra-broker balancing only applies to Kafka deployments that use JBOD storage with multiple disks.";
-            LOGGER.errorCr(reconciliation, "Status updated to [NotReady] due to error: {}", new InvalidResourceException(error).getMessage());
-            return updateStatus(reconciliation, kafkaRebalance, new KafkaRebalanceStatus(), new InvalidResourceException(error)).mapEmpty();
-        }
+        Promise<KafkaRebalanceStatus> reconcilePromise = Promise.promise();
 
         try {
             AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder = convertRebalanceSpecToRebalanceOptions(kafkaRebalance.getSpec());
 
-            return computeNextStatus(reconciliation, host, apiClient, kafkaRebalance, currentState, rebalanceAnnotation, rebalanceOptionsBuilder)
+            computeNextStatus(reconciliation, host, apiClient, kafkaRebalance, currentState, rebalanceOptionsBuilder)
                     .compose(desiredStatusAndMap -> {
-                        // More events related to resource modification might be queued with a stale state. (potentially updated by the rebalance holding the lock)
-                        // Due to possible long rebalancing operations that take the lock for the entire period,
-                        // do a new get to retrieve the current resource state.
-                        return kafkaRebalanceOperator.getAsync(reconciliation.namespace(), reconciliation.name())
-                                .compose(currentKafkaRebalance -> {
-                                    if (currentKafkaRebalance != null) {
-                                        return configMapOperator.reconcile(reconciliation, kafkaRebalance.getMetadata().getNamespace(),
-                                                kafkaRebalance.getMetadata().getName(), desiredStatusAndMap.getLoadMap())
-                                                .compose(i -> updateStatus(reconciliation, currentKafkaRebalance, desiredStatusAndMap.getStatus(), null))
-                                                .compose(updatedKafkaRebalance -> {
-                                                    if (currentKafkaRebalance.getStatus() != null
-                                                            && updatedKafkaRebalance.getStatus() != null
-                                                            && !rebalanceStateConditionType(currentKafkaRebalance.getStatus()).equals(rebalanceStateConditionType(updatedKafkaRebalance.getStatus()))) {
-                                                        String message = "KafkaRebalance state is now updated to [{}]";
+                        KafkaRebalanceAnnotation rebalanceAnnotation = rebalanceAnnotation(kafkaRebalance);
+                        return configMapOperator.reconcile(reconciliation, kafkaRebalance.getMetadata().getNamespace(),
+                                        kafkaRebalance.getMetadata().getName(), desiredStatusAndMap.getLoadMap())
+                                .onComplete(ignoredConfigMapResult -> {
+                                    KafkaRebalanceStatus kafkaRebalanceStatus = updateStatus(kafkaRebalance, desiredStatusAndMap.getStatus(), null);
+                                    if (kafkaRebalance.getStatus() != null
+                                            && kafkaRebalanceStatus != null
+                                            && KafkaRebalanceUtils.rebalanceState(kafkaRebalance.getStatus()) !=  KafkaRebalanceUtils.rebalanceState(kafkaRebalanceStatus)) {
+                                        String message = "KafkaRebalance state is now updated to [{}]";
 
-                                                        if (rawRebalanceAnnotation(updatedKafkaRebalance) != null) {
-                                                            message = message + " with annotation {}={} applied on the KafkaRebalance resource";
-                                                        }
-                                                        LOGGER.infoCr(reconciliation, message, rebalanceStateConditionType(updatedKafkaRebalance.getStatus()),
-                                                                ANNO_STRIMZI_IO_REBALANCE,
-                                                                rawRebalanceAnnotation(updatedKafkaRebalance));
-                                                    }
-                                                    if (hasRebalanceAnnotation(updatedKafkaRebalance)) {
-                                                        if (currentState != KafkaRebalanceState.ReconciliationPaused && rebalanceAnnotation != KafkaRebalanceAnnotation.none && !currentState.isValidateAnnotation(rebalanceAnnotation)) {
-                                                            return Future.succeededFuture();
-                                                        } else {
-                                                            LOGGER.infoCr(reconciliation, "Removing annotation {}={}",
-                                                                    ANNO_STRIMZI_IO_REBALANCE,
-                                                                    rawRebalanceAnnotation(updatedKafkaRebalance));
-                                                            // Updated KafkaRebalance has rebalance annotation removed as
-                                                            // action specified by user has been completed.
-                                                            KafkaRebalance patchedKafkaRebalance = new KafkaRebalanceBuilder(updatedKafkaRebalance)
-                                                                    .editMetadata()
-                                                                    .removeFromAnnotations(ANNO_STRIMZI_IO_REBALANCE)
-                                                                    .endMetadata()
-                                                                    .build();
-                                                            return kafkaRebalanceOperator.patchAsync(reconciliation, patchedKafkaRebalance);
-                                                        }
-                                                    } else {
-                                                        LOGGER.debugCr(reconciliation, "No annotation {}", ANNO_STRIMZI_IO_REBALANCE);
-                                                        return Future.succeededFuture();
-                                                    }
-                                                })
-                                                .mapEmpty();
-                                    } else {
-                                        return Future.succeededFuture();
+                                        if (rawRebalanceAnnotation(kafkaRebalance) != null) {
+                                            message = message + " with annotation {}={} applied on the KafkaRebalance resource";
+                                        }
+                                        LOGGER.infoCr(reconciliation, message, KafkaRebalanceUtils.rebalanceState(kafkaRebalanceStatus),
+                                                ANNO_STRIMZI_IO_REBALANCE,
+                                                rawRebalanceAnnotation(kafkaRebalance));
                                     }
-                                }, exception -> {
-                                    LOGGER.errorCr(reconciliation, "Status updated to [NotReady] due to error: {}", exception.getMessage());
-                                    return updateStatus(reconciliation, kafkaRebalance, new KafkaRebalanceStatus(), exception)
-                                            .mapEmpty();
+                                    if (hasRebalanceAnnotation(kafkaRebalance)) {
+                                        if (currentState != KafkaRebalanceState.ReconciliationPaused && rebalanceAnnotation != KafkaRebalanceAnnotation.none && !currentState.isValidateAnnotation(rebalanceAnnotation)) {
+                                            reconcilePromise.complete(kafkaRebalanceStatus);
+                                        } else {
+                                            LOGGER.infoCr(reconciliation, "Removing annotation {}={}",
+                                                    ANNO_STRIMZI_IO_REBALANCE,
+                                                    rawRebalanceAnnotation(kafkaRebalance));
+                                            // Updated KafkaRebalance has rebalance annotation removed as
+                                            // action specified by user has been completed.
+                                            KafkaRebalance patchedKafkaRebalance = new KafkaRebalanceBuilder(kafkaRebalance)
+                                                    .editMetadata()
+                                                        .removeFromAnnotations(ANNO_STRIMZI_IO_REBALANCE)
+                                                    .endMetadata()
+                                                    .build();
+                                            kafkaRebalanceOperator.patchAsync(reconciliation, patchedKafkaRebalance)
+                                                    .onComplete(ignoredKafkaRebalanceResult -> reconcilePromise.complete(kafkaRebalanceStatus));
+                                        }
+                                    } else {
+                                        LOGGER.debugCr(reconciliation, "No annotation {}", ANNO_STRIMZI_IO_REBALANCE);
+                                        reconcilePromise.complete(kafkaRebalanceStatus);
+                                    }
                                 });
-                    }, exception -> {
+                    }).onFailure(exception -> {
                         LOGGER.errorCr(reconciliation, "Status updated to [NotReady] due to error: {}", exception.getMessage());
-                        return updateStatus(reconciliation, kafkaRebalance, new KafkaRebalanceStatus(), exception)
-                                .mapEmpty();
+                        reconcilePromise.complete(updateStatus(kafkaRebalance, new KafkaRebalanceStatus(), exception));
                     });
         } catch (IllegalArgumentException e) {
             LOGGER.errorCr(reconciliation, "Status updated to [NotReady] due to error: {}", e.getMessage());
-            return updateStatus(reconciliation, kafkaRebalance, new KafkaRebalanceStatus(), e).mapEmpty();
+            return Future.succeededFuture(updateStatus(kafkaRebalance, new KafkaRebalanceStatus(), e));
         }
+
+        return reconcilePromise.future();
     }
 
     /**
@@ -497,36 +412,34 @@ public class KafkaRebalanceAssemblyOperator
     /* test */ protected Future<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> computeNextStatus(Reconciliation reconciliation,
                                                                          String host, CruiseControlApi apiClient,
                                                                          KafkaRebalance kafkaRebalance, KafkaRebalanceState currentState,
-                                                                         KafkaRebalanceAnnotation rebalanceAnnotation,
                                                                          AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
         switch (currentState) {
             case New:
                 return onNew(reconciliation, host, apiClient, kafkaRebalance, rebalanceOptionsBuilder);
             case PendingProposal:
-                return onPendingProposal(reconciliation, host, apiClient, kafkaRebalance, rebalanceAnnotation, rebalanceOptionsBuilder);
+                return onPendingProposal(reconciliation, host, apiClient, kafkaRebalance, rebalanceOptionsBuilder);
             case ProposalReady:
-                return onProposalReady(reconciliation, host, apiClient, kafkaRebalance, rebalanceAnnotation, rebalanceOptionsBuilder);
+                return onProposalReady(reconciliation, host, apiClient, kafkaRebalance, rebalanceOptionsBuilder);
             case Rebalancing:
-                return onRebalancing(reconciliation, host, apiClient, kafkaRebalance, rebalanceAnnotation, rebalanceOptionsBuilder);
+                return onRebalancing(reconciliation, host, apiClient, kafkaRebalance, rebalanceOptionsBuilder);
             case Stopped:
-                return onStop(reconciliation, host, apiClient, kafkaRebalance, rebalanceAnnotation, rebalanceOptionsBuilder);
+                return onStop(reconciliation, host, apiClient, kafkaRebalance, rebalanceOptionsBuilder);
             case Ready:
                 // Rebalance Complete
-                return onReady(reconciliation, host, apiClient, kafkaRebalance, rebalanceAnnotation, rebalanceOptionsBuilder);
+                return onReady(reconciliation, host, apiClient, kafkaRebalance, rebalanceOptionsBuilder);
             case ReconciliationPaused:
                 return onReconciliationPaused(reconciliation, host, apiClient, kafkaRebalance, rebalanceOptionsBuilder);
             case NotReady:
                 // Error case
-                return onNotReady(reconciliation, host, apiClient, kafkaRebalance, rebalanceAnnotation, rebalanceOptionsBuilder);
+                return onNotReady(reconciliation, host, apiClient, kafkaRebalance, rebalanceOptionsBuilder);
             default:
                 return Future.failedFuture(new RuntimeException("Unexpected state " + currentState));
         }
     }
 
     private KafkaRebalanceStatus buildRebalanceStatusFromPreviousStatus(KafkaRebalanceStatus currentStatus, Set<Condition> validation) {
-        List<Condition> conditions = new ArrayList<>();
-        conditions.addAll(validation);
-        Condition currentState = rebalanceStateCondition(currentStatus);
+        List<Condition> conditions = new ArrayList<>(validation);
+        Condition currentState = KafkaRebalanceUtils.rebalanceStateCondition(currentStatus);
         conditions.add(currentState);
         return new KafkaRebalanceStatusBuilder()
                 .withSessionId(currentStatus.getSessionId())
@@ -554,28 +467,26 @@ public class KafkaRebalanceAssemblyOperator
      * @param brokerLoadArray The JSONArray of broker load JSONObjects returned by the Cruise Control rebalance endpoint.
      * @return A map linking from broker ID integer to a map of load parameter to value.
      */
-    protected static Map<Integer, Map<String, Object>> extractLoadParameters(JsonArray brokerLoadArray) {
+    protected static Map<Integer, Map<String, Object>> extractLoadParameters(ArrayNode brokerLoadArray) {
 
         Map<Integer, Map<String, Object>> loadMap = new HashMap<>();
 
-        for (Object rawBrokerLoad : brokerLoadArray) {
-            JsonObject brokerLoad = (JsonObject) rawBrokerLoad;
-
+        for (JsonNode brokerLoad : brokerLoadArray) {
             Map<String, Object> brokerLoadMap = new HashMap<>();
 
             for (CruiseControlLoadParameters intParam : CruiseControlLoadParameters.getIntegerParameters()) {
-                if (brokerLoad.containsKey(intParam.getCruiseControlKey())) {
-                    brokerLoadMap.put(intParam.getKafkaRebalanceStatusKey(), brokerLoad.getInteger(intParam.getCruiseControlKey()));
+                if (brokerLoad.has(intParam.getCruiseControlKey())) {
+                    brokerLoadMap.put(intParam.getKafkaRebalanceStatusKey(), brokerLoad.get(intParam.getCruiseControlKey()).asInt());
                 }
             }
 
             for (CruiseControlLoadParameters doubleParam : CruiseControlLoadParameters.getDoubleParameters()) {
-                if (brokerLoad.containsKey(doubleParam.getCruiseControlKey())) {
-                    brokerLoadMap.put(doubleParam.getKafkaRebalanceStatusKey(), brokerLoad.getDouble(doubleParam.getCruiseControlKey()));
+                if (brokerLoad.has(doubleParam.getCruiseControlKey())) {
+                    brokerLoadMap.put(doubleParam.getKafkaRebalanceStatusKey(), brokerLoad.get(doubleParam.getCruiseControlKey()).asDouble());
                 }
             }
 
-            int brokerID = brokerLoad.getInteger(CruiseControlRebalanceKeys.BROKER_ID.getKey());
+            int brokerID = brokerLoad.get(CruiseControlRebalanceKeys.BROKER_ID.getKey()).asInt();
             loadMap.put(brokerID, brokerLoadMap);
 
         }
@@ -586,37 +497,55 @@ public class KafkaRebalanceAssemblyOperator
 
     /**
      * Converts the supplied before and after broker load arrays into a map linking from broker ID integer to a map linking
-     * from load parameter to an array of [before, after, difference]. The load parameters included in the map are dictated
-     * by the values in he {@link CruiseControlLoadParameters} enum.
+     * from load parameter to an array of [before, after, difference] if verbose was enabled with the request
+     * In case verbose was disabled, we only convert the after load array into map linking from broker ID integer to a map linking
+     * from load parameter to an array of [after].
+     * The load parameters included in the map are dictated by the values in he {@link CruiseControlLoadParameters} enum.
      *
-     * @param brokerLoadBeforeArray The JSONArray of broker load JSONObjects, for before the optimization proposal is applied,
+     * @param brokerLoadBeforeJson The JSONArray of broker load JSONObjects, for before the optimization proposal is applied,
      *                              returned by the Cruise Control rebalance endpoint.
-     * @param brokerLoadAfterArray The JSONArray of broker load JSONObjects, for after the optimization proposal is applied,
+     * @param brokerLoadAfterJson The JSONArray of broker load JSONObjects, for after the optimization proposal is applied,
      *                             returned by the Cruise Control rebalance endpoint.
      * @return A JsonObject linking from broker ID integer to a map of load parameter to [before, after, difference] arrays.
      */
-    protected static JsonObject parseLoadStats(JsonArray brokerLoadBeforeArray, JsonArray brokerLoadAfterArray) {
+    protected static JsonNode parseLoadStats(ArrayNode brokerLoadBeforeJson, ArrayNode brokerLoadAfterJson) {
+
+        if (brokerLoadBeforeJson == null && brokerLoadAfterJson == null) {
+            throw new IllegalArgumentException("The rebalance optimization proposal returned by Cruise Control did not contain broker load information");
+        }
 
         // There is no guarantee that the brokers are in the same order in both the before and after arrays.
         // Therefore we need to convert them into maps indexed by broker ID so we can align them later for the comparison.
-        Map<Integer, Map<String, Object>> loadBeforeMap = extractLoadParameters(brokerLoadBeforeArray);
-        Map<Integer, Map<String, Object>> loadAfterMap = extractLoadParameters(brokerLoadAfterArray);
 
-        if (loadBeforeMap.size() != loadAfterMap.size()) {
+        Map<Integer, Map<String, Object>> loadBeforeMap = new HashMap<>();
+
+        if (brokerLoadBeforeJson != null && !brokerLoadBeforeJson.isEmpty()) {
+            loadBeforeMap = extractLoadParameters(brokerLoadBeforeJson);
+        }
+
+        Map<Integer, Map<String, Object>> loadAfterMap = extractLoadParameters(brokerLoadAfterJson);
+
+        if (!loadBeforeMap.isEmpty() && loadBeforeMap.size() != loadAfterMap.size()) {
             throw new IllegalArgumentException("Broker data was missing from the load before/after information");
         }
 
-        JsonObject brokersStats = new JsonObject();
+        ObjectNode brokersStats = OBJECT_MAPPER.createObjectNode();
 
-        for (Map.Entry<Integer, Map<String, Object>> loadBeforeEntry : loadBeforeMap.entrySet()) {
-            Map<String, Object> brokerBefore = loadBeforeEntry.getValue();
-            Map<String, Object> brokerAfter = loadAfterMap.get(loadBeforeEntry.getKey());
+        for (Map.Entry<Integer, Map<String, Object>> loadAfterEntry : loadAfterMap.entrySet()) {
 
-            JsonObject brokerStats = new JsonObject();
+            Map<String, Object> brokerBefore = new HashMap<>();
+
+            if (!loadBeforeMap.isEmpty()) {
+                brokerBefore = loadBeforeMap.get(loadAfterEntry.getKey());
+            }
+
+            Map<String, Object> brokerAfter = loadAfterEntry.getValue();
+
+            ObjectNode brokerStats = OBJECT_MAPPER.createObjectNode();
 
             for (CruiseControlLoadParameters intLoadParameter : CruiseControlLoadParameters.getIntegerParameters()) {
 
-                if (brokerBefore.containsKey(intLoadParameter.getKafkaRebalanceStatusKey()) &&
+                if (!brokerBefore.isEmpty() && brokerBefore.containsKey(intLoadParameter.getKafkaRebalanceStatusKey()) &&
                         brokerAfter.containsKey(intLoadParameter.getKafkaRebalanceStatusKey())) {
 
                     int intBeforeStat = (int) brokerBefore.get(intLoadParameter.getKafkaRebalanceStatusKey());
@@ -624,17 +553,23 @@ public class KafkaRebalanceAssemblyOperator
                     int intDiff = intAfterStat - intBeforeStat;
 
 
-                    JsonObject intStats = new JsonObject();
+                    ObjectNode intStats = OBJECT_MAPPER.createObjectNode();
                     intStats.put("before", intBeforeStat);
                     intStats.put("after", intAfterStat);
                     intStats.put("diff", intDiff);
 
-                    brokerStats.put(intLoadParameter.getKafkaRebalanceStatusKey(), intStats);
+                    brokerStats.set(intLoadParameter.getKafkaRebalanceStatusKey(), intStats);
+                } else if (brokerBefore.isEmpty() &&
+                        brokerAfter.containsKey(intLoadParameter.getKafkaRebalanceStatusKey())) {
+                    int intAfterStat = (int) brokerAfter.get(intLoadParameter.getKafkaRebalanceStatusKey());
+                    ObjectNode intStats = OBJECT_MAPPER.createObjectNode();
+                    intStats.put("after", intAfterStat);
+
+                    brokerStats.set(intLoadParameter.getKafkaRebalanceStatusKey(), intStats);
                 } else {
                     LOGGER.warnOp("{} information was missing from the broker before/after load information",
                             intLoadParameter.getKafkaRebalanceStatusKey());
                 }
-
             }
 
             for (CruiseControlLoadParameters doubleLoadParameter : CruiseControlLoadParameters.getDoubleParameters()) {
@@ -646,12 +581,19 @@ public class KafkaRebalanceAssemblyOperator
                     double doubleAfterStat = (double) brokerAfter.get(doubleLoadParameter.getKafkaRebalanceStatusKey());
                     double doubleDiff = doubleAfterStat - doubleBeforeStat;
 
-                    JsonObject doubleStats = new JsonObject();
+                    ObjectNode doubleStats = OBJECT_MAPPER.createObjectNode();
                     doubleStats.put("before", doubleBeforeStat);
                     doubleStats.put("after", doubleAfterStat);
                     doubleStats.put("diff", doubleDiff);
 
-                    brokerStats.put(doubleLoadParameter.getKafkaRebalanceStatusKey(), doubleStats);
+                    brokerStats.set(doubleLoadParameter.getKafkaRebalanceStatusKey(), doubleStats);
+                } else if (brokerBefore.isEmpty() &&
+                        brokerAfter.containsKey(doubleLoadParameter.getKafkaRebalanceStatusKey())) {
+                    double doubleAfterStat = (double) brokerAfter.get(doubleLoadParameter.getKafkaRebalanceStatusKey());
+                    ObjectNode doubleStats = OBJECT_MAPPER.createObjectNode();
+                    doubleStats.put("after", doubleAfterStat);
+
+                    brokerStats.set(doubleLoadParameter.getKafkaRebalanceStatusKey(), doubleStats);
                 } else {
                     LOGGER.warnOp("{} information was missing from the broker before/after load information",
                             doubleLoadParameter.getKafkaRebalanceStatusKey());
@@ -659,7 +601,7 @@ public class KafkaRebalanceAssemblyOperator
 
             }
 
-            brokersStats.put(String.valueOf(loadBeforeEntry.getKey()), brokerStats);
+            brokersStats.set(String.valueOf(loadAfterEntry.getKey()), brokerStats);
         }
 
         return brokersStats;
@@ -699,23 +641,22 @@ public class KafkaRebalanceAssemblyOperator
      * @param  proposalJson The JSONObject representing the response from the Cruise Control rebalance endpoint.
      * @return A wrapper class containing the proposal summary map and a config map containing broker load.
      */
-    protected static MapAndStatus<ConfigMap, Map<String, Object>> processOptimizationProposal(KafkaRebalance kafkaRebalance, JsonObject proposalJson) {
+    protected static MapAndStatus<ConfigMap, Map<String, Object>> processOptimizationProposal(KafkaRebalance kafkaRebalance, JsonNode proposalJson) {
 
-        JsonArray brokerLoadBeforeOptimization;
-        JsonArray brokerLoadAfterOptimization;
-        if (proposalJson.containsKey(CruiseControlRebalanceKeys.LOAD_BEFORE_OPTIMIZATION.getKey()) &&
-                proposalJson.containsKey(CruiseControlRebalanceKeys.LOAD_AFTER_OPTIMIZATION.getKey())) {
-            brokerLoadBeforeOptimization = proposalJson
-                    .getJsonObject(CruiseControlRebalanceKeys.LOAD_BEFORE_OPTIMIZATION.getKey())
-                    .getJsonArray(CruiseControlRebalanceKeys.BROKERS.getKey());
-            brokerLoadAfterOptimization = proposalJson
-                    .getJsonObject(CruiseControlRebalanceKeys.LOAD_AFTER_OPTIMIZATION.getKey())
-                    .getJsonArray(CruiseControlRebalanceKeys.BROKERS.getKey());
-        } else {
-            throw new IllegalArgumentException("The rebalance optimization proposal returned by Cruise Control did not contain broker load information");
+        ArrayNode brokerLoadBeforeOptimization = null;
+        ArrayNode brokerLoadAfterOptimization = null;
+        if (proposalJson.has(CruiseControlRebalanceKeys.LOAD_BEFORE_OPTIMIZATION.getKey())) {
+            brokerLoadBeforeOptimization = (ArrayNode) proposalJson
+                    .get(CruiseControlRebalanceKeys.LOAD_BEFORE_OPTIMIZATION.getKey())
+                    .get(CruiseControlRebalanceKeys.BROKERS.getKey());
+        }
+        if (proposalJson.has(CruiseControlRebalanceKeys.LOAD_AFTER_OPTIMIZATION.getKey())) {
+            brokerLoadAfterOptimization = (ArrayNode) proposalJson
+                    .get(CruiseControlRebalanceKeys.LOAD_AFTER_OPTIMIZATION.getKey())
+                    .get(CruiseControlRebalanceKeys.BROKERS.getKey());
         }
 
-        JsonObject beforeAndAfterBrokerLoad = parseLoadStats(
+        JsonNode beforeAndAfterBrokerLoad = parseLoadStats(
                 brokerLoadBeforeOptimization, brokerLoadAfterOptimization);
 
         ConfigMap rebalanceMap = new ConfigMapBuilder()
@@ -725,14 +666,15 @@ public class KafkaRebalanceAssemblyOperator
                     .withLabels(Collections.singletonMap("app", "strimzi"))
                     .withOwnerReferences(ModelUtils.createOwnerReference(kafkaRebalance, false))
                 .endMetadata()
-                .withData(Collections.singletonMap(BROKER_LOAD_KEY, beforeAndAfterBrokerLoad.encode()))
+                .withData(Collections.singletonMap(BROKER_LOAD_KEY, beforeAndAfterBrokerLoad.toPrettyString()))
                 .build();
 
-        proposalJson.getJsonObject(CruiseControlRebalanceKeys.SUMMARY.getKey()).getMap().put("afterBeforeLoadConfigMap", rebalanceMap.getMetadata().getName());
-        return new MapAndStatus<>(rebalanceMap, proposalJson.getJsonObject(CruiseControlRebalanceKeys.SUMMARY.getKey()).getMap());
+        Map<String, Object> summaryMap = OBJECT_MAPPER.convertValue(proposalJson.get(CruiseControlRebalanceKeys.SUMMARY.getKey()), new TypeReference<Map<String, Object>>() { });
+        summaryMap.put("afterBeforeLoadConfigMap", rebalanceMap.getMetadata().getName());
+        return new MapAndStatus<>(rebalanceMap, summaryMap);
     }
 
-    private MapAndStatus<ConfigMap, KafkaRebalanceStatus> buildRebalanceStatus(KafkaRebalance kafkaRebalance, String sessionID, KafkaRebalanceState cruiseControlState, JsonObject proposalJson, Set<Condition> validation) {
+    private MapAndStatus<ConfigMap, KafkaRebalanceStatus> buildRebalanceStatus(KafkaRebalance kafkaRebalance, String sessionID, KafkaRebalanceState cruiseControlState, JsonNode proposalJson, Set<Condition> validation) {
         List<Condition> conditions = new ArrayList<>();
         conditions.add(StatusUtils.buildRebalanceCondition(cruiseControlState.toString()));
         conditions.addAll(validation);
@@ -773,16 +715,14 @@ public class KafkaRebalanceAssemblyOperator
      * @param host Cruise Control service to which sending the rebalance proposal request
      * @param apiClient Cruise Control REST API client instance
      * @param kafkaRebalance Current {@code KafkaRebalance} resource
-     * @param rebalanceAnnotation The current value for the strimzi.io/rebalance annotation
      * @param rebalanceOptionsBuilder builder for the Cruise Control REST API client options
      * @return a Future with the next {@code MapAndStatus<ConfigMap, KafkaRebalanceStatus> } including the ConfigMap and state
      */
     private Future<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> onNotReady(Reconciliation reconciliation,
                                                                              String host, CruiseControlApi apiClient,
                                                                              KafkaRebalance kafkaRebalance,
-                                                                             KafkaRebalanceAnnotation rebalanceAnnotation,
                                                                              AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
-
+        KafkaRebalanceAnnotation rebalanceAnnotation = rebalanceAnnotation(kafkaRebalance);
         if (shouldRenewRebalance(kafkaRebalance, rebalanceAnnotation)) {
             // CC is activated from the disabled state or the user has fixed the error on the resource and want to 'refresh'
             return onNew(reconciliation, host, apiClient, kafkaRebalance, rebalanceOptionsBuilder);
@@ -829,80 +769,135 @@ public class KafkaRebalanceAssemblyOperator
      * @param host Cruise Control service to which sending the REST API requests
      * @param apiClient Cruise Control REST API client instance
      * @param kafkaRebalance Current {@code KafkaRebalance} resource
-     * @param rebalanceAnnotation The current value for the strimzi.io/rebalance annotation
      * @param rebalanceOptionsBuilder builder for the Cruise Control REST API client options
      * @return a Future with the next {@code MapAndStatus<ConfigMap, KafkaRebalanceStatus>} including the ConfigMap and state.
      */
     private Future<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> onPendingProposal(Reconciliation reconciliation,
                                                                     String host, CruiseControlApi apiClient,
                                                                     KafkaRebalance kafkaRebalance,
-                                                                    KafkaRebalanceAnnotation rebalanceAnnotation,
                                                                     AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
         Promise<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> p = Promise.promise();
-        if (rebalanceAnnotation == KafkaRebalanceAnnotation.none) {
-            LOGGER.debugCr(reconciliation, "Starting Cruise Control rebalance proposal request timer");
-            vertx.setPeriodic(rebalancePollingTimerDelay(), t ->
-                kafkaRebalanceOperator.getAsync(kafkaRebalance.getMetadata().getNamespace(), kafkaRebalance.getMetadata().getName())
-                    .onSuccess(currentKafkaRebalance -> {
-                        // Checking that the resource was not deleted between periodic polls
-                        if (currentKafkaRebalance != null) {
-                            // Check resource is in the right state as previous execution might have set the status and completed the future
-                            // Safety check as timer might be called again (from a delayed timer firing)
-                            if (state(currentKafkaRebalance) == KafkaRebalanceState.PendingProposal) {
-                                if (rebalanceAnnotation(currentKafkaRebalance) == KafkaRebalanceAnnotation.refresh) {
-                                    LOGGER.debugCr(reconciliation, "Requesting a new proposal since refresh annotation is applied on the KafkaRebalance resource");
-                                    vertx.cancelTimer(t);
-                                    requestRebalance(reconciliation, host, apiClient, currentKafkaRebalance, true, rebalanceOptionsBuilder).onSuccess(p::complete);
-                                } else if (rebalanceAnnotation(currentKafkaRebalance) == KafkaRebalanceAnnotation.stop) {
-                                    LOGGER.debugCr(reconciliation, "Stopping current Cruise Control proposal request timer");
-                                    vertx.cancelTimer(t);
-                                    p.complete(buildRebalanceStatus(null, KafkaRebalanceState.Stopped, StatusUtils.validate(reconciliation, currentKafkaRebalance)));
-                                } else {
-                                    requestRebalance(reconciliation, host, apiClient, kafkaRebalance, true, rebalanceOptionsBuilder,
-                                            currentKafkaRebalance.getStatus().getSessionId())
-                                        .onSuccess(rebalanceMapAndStatus -> {
-                                            // If the returned status has an optimization result then the rebalance proposal
-                                            // is ready, so stop the polling
-                                            KafkaRebalanceStatus status = rebalanceMapAndStatus.getStatus();
-                                            Set<Condition> conditions = new HashSet<>();
-                                            validateAnnotation(reconciliation, conditions, KafkaRebalanceState.PendingProposal, rebalanceAnnotation(currentKafkaRebalance), kafkaRebalance);
-                                            status.addConditions(conditions);
-                                            rebalanceMapAndStatus.setStatus(status);
-                                            if (rebalanceMapAndStatus.getStatus().getOptimizationResult() != null &&
-                                                    !rebalanceMapAndStatus.getStatus().getOptimizationResult().isEmpty()) {
-                                                vertx.cancelTimer(t);
-                                                LOGGER.debugCr(reconciliation, "Optimization proposal ready");
-                                                p.complete(rebalanceMapAndStatus);
-                                            } else {
-                                                // The rebalance proposal is still not ready yet, keep the timer for polling
-                                                LOGGER.debugCr(reconciliation, "Waiting for optimization proposal to be ready");
-                                            }
-                                        })
-                                        .onFailure(e -> {
-                                            LOGGER.errorCr(reconciliation, "Cruise Control getting rebalance proposal failed");
-                                            vertx.cancelTimer(t);
-                                            p.fail(e);
-                                        });
-                                }
-                            } else {
-                                p.complete(new MapAndStatus<>(null, currentKafkaRebalance.getStatus()));
-                            }
-                        } else {
-                            LOGGER.debugCr(reconciliation, "Rebalance resource was deleted, stopping the request time");
-                            vertx.cancelTimer(t);
-                            p.complete();
-                        }
-                    })
+
+        if (rebalanceAnnotation(kafkaRebalance) == KafkaRebalanceAnnotation.refresh) {
+            LOGGER.infoCr(reconciliation, "Requesting a new proposal since refresh annotation is applied on the KafkaRebalance resource");
+            requestRebalance(reconciliation, host, apiClient, kafkaRebalance, true, rebalanceOptionsBuilder)
+                    .onSuccess(p::complete)
                     .onFailure(e -> {
-                        LOGGER.errorCr(reconciliation, "Cruise Control getting rebalance resource failed", e.getCause());
-                        vertx.cancelTimer(t);
-                        p.fail(e.getCause());
-                    })
-            );
+                        LOGGER.errorCr(reconciliation, "Requesting a new proposal with refresh annotation failed", e);
+                        p.fail(e);
+                    });
+        } else if (rebalanceAnnotation(kafkaRebalance) == KafkaRebalanceAnnotation.stop) {
+            LOGGER.infoCr(reconciliation, "Stopping to request proposal or checking the status");
+            p.complete(buildRebalanceStatus(null, KafkaRebalanceState.Stopped, StatusUtils.validate(reconciliation, kafkaRebalance)));
         } else {
-            p.complete(new MapAndStatus<>(null, kafkaRebalance.getStatus()));
+            LOGGER.infoCr(reconciliation, "Requesting a new proposal or checking the status for an already issued one");
+            Set<Condition> conditions = StatusUtils.validate(reconciliation, kafkaRebalance);
+            validateAnnotation(reconciliation, conditions, KafkaRebalanceState.PendingProposal, rebalanceAnnotation(kafkaRebalance), kafkaRebalance);
+            String sessionId = kafkaRebalance.getStatus().getSessionId();
+            if (sessionId == null) {
+                // sessionId can be null if the response to the previously issued request for a proposal was NotEnoughDataForProposal.
+                requestRebalance(reconciliation, host, apiClient, kafkaRebalance, true, rebalanceOptionsBuilder)
+                        .onSuccess(p::complete)
+                        .onFailure(e -> {
+                            LOGGER.errorCr(reconciliation, "Requesting a new proposal failed", e);
+                            p.fail(e);
+                        });
+            } else {
+                VertxUtil.completableFutureToVertxFuture(apiClient.getUserTaskStatus(reconciliation, host, cruiseControlPort, sessionId))
+                        .onSuccess(cruiseControlResponse -> handleUserTaskStatusResponse(reconciliation, cruiseControlResponse, p, sessionId, conditions, kafkaRebalance, configMapOperator, true, host, apiClient, rebalanceOptionsBuilder))
+                        .onFailure(e -> {
+                            LOGGER.errorCr(reconciliation, "Cruise Control getting rebalance proposal status failed", e.getCause());
+                            p.fail(new CruiseControlRestException("Cruise Control getting rebalance proposal status failed"));
+                        });
+            }
         }
         return p.future();
+    }
+
+    private void handleUserTaskStatusResponse(Reconciliation reconciliation, CruiseControlUserTasksResponse cruiseControlResponse,
+                                              Promise<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> p, String sessionId,
+                                              Set<Condition> conditions, KafkaRebalance kafkaRebalance,
+                                              ConfigMapOperator configMapOperator, boolean dryRun,
+                                              String host, CruiseControlApi apiClient,
+                                              AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
+        if (cruiseControlResponse.isMaxActiveUserTasksReached()) {
+            LOGGER.warnCr(reconciliation, "The maximum number of active user tasks that Cruise Control can run concurrently has been reached, therefore will retry getting user tasks in the next reconciliation. " +
+                    "If this occurs often, consider increasing the value for max.active.user.tasks in the Cruise Control configuration.");
+            configMapOperator.getAsync(kafkaRebalance.getMetadata().getNamespace(), kafkaRebalance.getMetadata().getName())
+                    .onSuccess(loadmap -> p.complete(new MapAndStatus<>(loadmap, buildRebalanceStatusFromPreviousStatus(kafkaRebalance.getStatus(), conditions))));
+            return;
+        }
+
+        if (cruiseControlResponse.getJson().isEmpty()) {
+            // This may happen if:
+            // 1. Cruise Control restarted so resetting the state because the tasks queue is not persisted
+            // 2. Task's retention time expired, or the cache has become full
+            LOGGER.warnCr(reconciliation, "User task {} not found, going to generate a new proposal", sessionId);
+            requestRebalance(reconciliation, host, apiClient, kafkaRebalance, true, rebalanceOptionsBuilder)
+                    .onSuccess(p::complete)
+                    .onFailure(e -> {
+                        LOGGER.errorCr(reconciliation, "Generating a new proposal failed", e);
+                        p.fail(e);
+                    });
+            return;
+        }
+
+        JsonNode taskStatusJson = cruiseControlResponse.getJson();
+        CruiseControlUserTaskStatus taskStatus = CruiseControlUserTaskStatus.lookup(taskStatusJson.get("Status").asText());
+        switch (taskStatus) {
+            case COMPLETED_WITH_ERROR:
+                // TODO: There doesn't seem to be a way to retrieve the actual error message from the user tasks endpoint?
+                //       We may need to propose an upstream PR for this.
+                // TODO: Once we can get the error details we need to add an error field to the Rebalance Status to hold
+                //       details of any issues while rebalancing.
+                LOGGER.errorCr(reconciliation, "Rebalance ({}) optimization proposal has failed to complete", sessionId);
+                p.complete(buildRebalanceStatus(sessionId, KafkaRebalanceState.NotReady, conditions));
+                break;
+            case COMPLETED:
+                if (!dryRun) {
+                    p.complete(buildRebalanceStatus(kafkaRebalance, null, KafkaRebalanceState.Ready, taskStatusJson, conditions));
+                    break;
+                }
+                // If it is for the status of rebalance(dryrun=true), optimization load needs to be checked
+            case IN_EXECUTION:
+                if (dryRun) {
+                    // If the returned status has an optimization result then the rebalance proposal is ready.
+                    if (taskStatusJson.has(CruiseControlRebalanceKeys.LOAD_BEFORE_OPTIMIZATION.getKey()) &&
+                            taskStatusJson.has(CruiseControlRebalanceKeys.LOAD_AFTER_OPTIMIZATION.getKey())) {
+                        LOGGER.infoCr(reconciliation, "Rebalance ({}) optimization proposal is now ready", sessionId);
+                        System.out.println("Status" + taskStatusJson);
+                        p.complete(buildRebalanceStatus(kafkaRebalance, sessionId, KafkaRebalanceState.ProposalReady, taskStatusJson, conditions));
+                        break;
+                    }
+                } else {
+                    // We need to check that the status has been updated with the ongoing optimisation proposal
+                    // The proposal field can be empty if a rebalance(dryrun=false) was called and the optimisation
+                    // proposal was still being prepared (in progress). In that case the rebalance will start when
+                    // the proposal is complete but the optimisation proposal summary will be missing.
+                    if (kafkaRebalance.getStatus().getOptimizationResult() == null ||
+                            kafkaRebalance.getStatus().getOptimizationResult().isEmpty()) {
+                        LOGGER.infoCr(reconciliation, "Rebalance ({}) optimization proposal is now ready and has been added to the status", sessionId);
+                        p.complete(buildRebalanceStatus(
+                                kafkaRebalance, sessionId, KafkaRebalanceState.Rebalancing, taskStatusJson, conditions));
+                        break;
+                    }
+                    // TODO: Find out if there is any way to check the progress of a rebalance.
+                    //       We could parse the verbose proposal for total number of reassignments and compare to number completed (if available)?
+                    //       We can then update the status at this point.
+                }
+            case ACTIVE:
+                // If a rebalance(dryrun=false) was called and the proposal is still being prepared then the task
+                // will be in an ACTIVE state. When the proposal is ready it will shift to IN_EXECUTION and we will
+                // check that the optimisation proposal is added to the status on the next reconcile.
+                LOGGER.infoCr(reconciliation, "Rebalance ({}) optimization proposal is still being prepared", sessionId);
+                configMapOperator.getAsync(kafkaRebalance.getMetadata().getNamespace(), kafkaRebalance.getMetadata().getName())
+                        .onSuccess(loadmap -> p.complete(new MapAndStatus<>(loadmap, buildRebalanceStatusFromPreviousStatus(kafkaRebalance.getStatus(), conditions))));
+                break;
+            default:
+                LOGGER.errorCr(reconciliation, "Unexpected state {}", taskStatus);
+                p.fail("Unexpected state " + taskStatus);
+                break;
+        }
     }
 
     /**
@@ -918,19 +913,18 @@ public class KafkaRebalanceAssemblyOperator
      * @param host Cruise Control service to which sending the rebalance request
      * @param apiClient Cruise Control REST API client instance
      * @param kafkaRebalance Current {@code KafkaRebalance} resource
-     * @param rebalanceAnnotation The current value for the strimzi.io/rebalance annotation
      * @param rebalanceOptionsBuilder builder for the Cruise Control REST API client options
      * @return a Future with the next {@code MapAndStatus<ConfigMap, KafkaRebalanceStatus>} including the ConfigMap and state
      */
     private Future<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> onProposalReady(Reconciliation reconciliation,
                                                                       String host, CruiseControlApi apiClient,
                                                                       KafkaRebalance kafkaRebalance,
-                                                                      KafkaRebalanceAnnotation rebalanceAnnotation,
                                                                       AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
         if (Annotations.booleanAnnotation(kafkaRebalance, ANNO_STRIMZI_IO_REBALANCE_AUTOAPPROVAL, false)) {
             LOGGER.infoCr(reconciliation, "Auto-approval set on the KafkaRebalance resource");
             return requestRebalance(reconciliation, host, apiClient, kafkaRebalance, false, rebalanceOptionsBuilder);
         } else {
+            KafkaRebalanceAnnotation rebalanceAnnotation = rebalanceAnnotation(kafkaRebalance);
             switch (rebalanceAnnotation) {
                 case none:
                     LOGGER.debugCr(reconciliation, "No {} annotation set", ANNO_STRIMZI_IO_REBALANCE);
@@ -965,132 +959,48 @@ public class KafkaRebalanceAssemblyOperator
      * @param host Cruise Control service to which sending the REST API requests
      * @param apiClient Cruise Control REST API client instance
      * @param kafkaRebalance Current {@code KafkaRebalance} resource
-     * @param rebalanceAnnotation The current value for the strimzi.io/rebalance annotation
      * @return a Future with the next {@code MapAndStatus<ConfigMap, KafkaRebalanceStatus>} including the state
      */
     private Future<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> onRebalancing(Reconciliation reconciliation,
                                                                                 String host, CruiseControlApi apiClient,
                                                                                 KafkaRebalance kafkaRebalance,
-                                                                                KafkaRebalanceAnnotation rebalanceAnnotation,
                                                                                 AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
         Promise<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> p = Promise.promise();
-        if (rebalanceAnnotation == KafkaRebalanceAnnotation.none) {
-            LOGGER.infoCr(reconciliation, "Starting Cruise Control rebalance user task status timer");
-            String sessionId = kafkaRebalance.getStatus().getSessionId();
-            AtomicInteger ccApiErrorCount = new AtomicInteger();
-            vertx.setPeriodic(rebalancePollingTimerDelay(), t -> {
-                // Check that we have not already failed to contact the API beyond the allowed number of times.
-                if (ccApiErrorCount.get() >= MAX_API_RETRIES) {
-                    vertx.cancelTimer(t);
-                    p.fail(new CruiseControlRestException("Unable to reach Cruise Control API after " + MAX_API_RETRIES + " attempts"));
-                }
-                kafkaRebalanceOperator.getAsync(kafkaRebalance.getMetadata().getNamespace(), kafkaRebalance.getMetadata().getName())
-                    .onSuccess(currentKafkaRebalance -> {
-                        // Checking that the resource was not deleted between periodic polls
-                        if (currentKafkaRebalance != null) {
-                            // Check resource is in the right state as previous execution might have set the status and completed the future
-                            // Safety check as timer might be called again (from a delayed timer firing)
-                            if (state(currentKafkaRebalance) == KafkaRebalanceState.Rebalancing) {
-                                if (rebalanceAnnotation(currentKafkaRebalance) == KafkaRebalanceAnnotation.stop) {
-                                    LOGGER.debugCr(reconciliation, "Stopping current Cruise Control rebalance user task");
-                                    vertx.cancelTimer(t);
-                                    apiClient.stopExecution(host, CruiseControl.REST_API_PORT)
-                                        .onSuccess(r -> p.complete(buildRebalanceStatus(null, KafkaRebalanceState.Stopped, StatusUtils.validate(reconciliation, kafkaRebalance))))
-                                        .onFailure(e -> {
-                                            LOGGER.errorCr(reconciliation, "Cruise Control stopping execution failed", e.getCause());
-                                            p.fail(e.getCause());
-                                        });
-                                } else if (rebalanceAnnotation(currentKafkaRebalance) == KafkaRebalanceAnnotation.refresh) {
-                                    LOGGER.debugCr(reconciliation, "Stopping current Cruise Control rebalance user task since refresh annotation is applied on the KafkaRebalance resource and requesting a new proposal");
-                                    vertx.cancelTimer(t);
-                                    apiClient.stopExecution(host, CruiseControl.REST_API_PORT)
-                                            .onSuccess(r -> {
-                                                requestRebalance(reconciliation, host, apiClient, currentKafkaRebalance, true, rebalanceOptionsBuilder).onSuccess(p::complete);
-                                            })
-                                            .onFailure(e -> {
-                                                LOGGER.errorCr(reconciliation, "Cruise Control stopping execution failed", e.getCause());
-                                                p.fail(e.getCause());
-                                            });
-                                } else {
-                                    LOGGER.infoCr(reconciliation, "Getting Cruise Control rebalance user task status");
-                                    Set<Condition> conditions = StatusUtils.validate(reconciliation, kafkaRebalance);
-                                    validateAnnotation(reconciliation, conditions, KafkaRebalanceState.Rebalancing, rebalanceAnnotation(currentKafkaRebalance), kafkaRebalance);
-                                    apiClient.getUserTaskStatus(host, CruiseControl.REST_API_PORT, sessionId)
-                                        .onSuccess(cruiseControlResponse -> {
-                                            JsonObject taskStatusJson = cruiseControlResponse.getJson();
-                                            CruiseControlUserTaskStatus taskStatus = CruiseControlUserTaskStatus.lookup(taskStatusJson.getString("Status"));
-                                            switch (taskStatus) {
-                                                case COMPLETED:
-                                                    vertx.cancelTimer(t);
-                                                    LOGGER.infoCr(reconciliation, "Rebalance ({}) is now complete", sessionId);
-                                                    p.complete(buildRebalanceStatus(
-                                                            kafkaRebalance, null, KafkaRebalanceState.Ready, taskStatusJson, conditions));
-                                                    break;
-                                                case COMPLETED_WITH_ERROR:
-                                                    // TODO: There doesn't seem to be a way to retrieve the actual error message from the user tasks endpoint?
-                                                    //       We may need to propose an upstream PR for this.
-                                                    // TODO: Once we can get the error details we need to add an error field to the Rebalance Status to hold
-                                                    //       details of any issues while rebalancing.
-                                                    LOGGER.errorCr(reconciliation, "Rebalance ({}) optimization proposal has failed to complete", sessionId);
-                                                    vertx.cancelTimer(t);
-                                                    p.complete(buildRebalanceStatus(sessionId, KafkaRebalanceState.NotReady, conditions));
-                                                    break;
-                                                case IN_EXECUTION: // Rebalance is still in progress
-                                                    // We need to check that the status has been updated with the ongoing optimisation proposal
-                                                    // The proposal field can be empty if a rebalance(dryrun=false) was called and the optimisation
-                                                    // proposal was still being prepared (in progress). In that case the rebalance will start when
-                                                    // the proposal is complete but the optimisation proposal summary will be missing.
-                                                    if (currentKafkaRebalance.getStatus().getOptimizationResult() == null ||
-                                                            currentKafkaRebalance.getStatus().getOptimizationResult().isEmpty()) {
-                                                        LOGGER.infoCr(reconciliation, "Rebalance ({}) optimization proposal is now ready and has been added to the status", sessionId);
-                                                        // Cancel the timer so that the status is returned and updated.
-                                                        vertx.cancelTimer(t);
-                                                        p.complete(buildRebalanceStatus(
-                                                                kafkaRebalance, sessionId, KafkaRebalanceState.Rebalancing, taskStatusJson, conditions));
-                                                    }
-                                                    ccApiErrorCount.set(0);
-                                                    // TODO: Find out if there is any way to check the progress of a rebalance.
-                                                    //       We could parse the verbose proposal for total number of reassignments and compare to number completed (if available)?
-                                                    //       We can then update the status at this point.
-                                                    break;
-                                                case ACTIVE: // Rebalance proposal is still being calculated
-                                                    // If a rebalance(dryrun=false) was called and the proposal is still being prepared then the task
-                                                    // will be in an ACTIVE state. When the proposal is ready it will shift to IN_EXECUTION and we will
-                                                    // check that the optimisation proposal is added to the status on the next reconcile.
-                                                    LOGGER.infoCr(reconciliation, "Rebalance ({}) optimization proposal is still being prepared", sessionId);
-                                                    ccApiErrorCount.set(0);
-                                                    break;
-                                                default:
-                                                    LOGGER.errorCr(reconciliation, "Unexpected state {}", taskStatus);
-                                                    vertx.cancelTimer(t);
-                                                    p.fail("Unexpected state " + taskStatus);
-                                                    break;
-                                            }
-                                        })
-                                        .onFailure(e -> {
-                                            LOGGER.errorCr(reconciliation, "Cruise Control getting rebalance task status failed", e.getCause());
-                                            // To make sure this error is not just a temporary problem with the network we retry several times.
-                                            // If the number of errors pass the MAX_API_ERRORS limit then the period method will fail the promise.
-                                            ccApiErrorCount.getAndIncrement();
-                                        });
-                                }
-                            } else {
-                                p.complete(new MapAndStatus<>(null, currentKafkaRebalance.getStatus()));
-                            }
-                        } else {
-                            LOGGER.warnCr(reconciliation, "Rebalance resource was deleted, rebalancing is still in progress but the status won't be reported");
-                            vertx.cancelTimer(t);
-                            p.complete();
-                        }
+
+        String sessionId = kafkaRebalance.getStatus().getSessionId();
+        if (rebalanceAnnotation(kafkaRebalance) == KafkaRebalanceAnnotation.stop) {
+            LOGGER.infoCr(reconciliation, "Stopping current Cruise Control rebalance user task");
+            VertxUtil.completableFutureToVertxFuture(apiClient.stopExecution(reconciliation, host, cruiseControlPort))
+                .onSuccess(r -> p.complete(buildRebalanceStatus(null, KafkaRebalanceState.Stopped, StatusUtils.validate(reconciliation, kafkaRebalance))))
+                .onFailure(e -> {
+                    LOGGER.errorCr(reconciliation, "Cruise Control stopping execution failed", e.getCause());
+                    p.fail(e.getCause());
+                });
+        } else if (rebalanceAnnotation(kafkaRebalance) == KafkaRebalanceAnnotation.refresh) {
+            LOGGER.infoCr(reconciliation, "Stopping current Cruise Control rebalance user task since refresh annotation is applied on the KafkaRebalance resource and requesting a new proposal");
+            VertxUtil.completableFutureToVertxFuture(apiClient.stopExecution(reconciliation, host, cruiseControlPort))
+                    .onSuccess(r -> {
+                        requestRebalance(reconciliation, host, apiClient, kafkaRebalance, true, rebalanceOptionsBuilder)
+                                .onSuccess(p::complete)
+                                .onFailure(e -> {
+                                    LOGGER.errorCr(reconciliation, "Requesting a new proposal with refresh annotation failed", e);
+                                    p.fail(e);
+                                });
                     })
                     .onFailure(e -> {
-                        LOGGER.errorCr(reconciliation, "Cruise Control getting rebalance resource failed", e.getCause());
-                        vertx.cancelTimer(t);
+                        LOGGER.errorCr(reconciliation, "Cruise Control stopping execution failed", e.getCause());
                         p.fail(e.getCause());
                     });
-            });
         } else {
-            p.complete(new MapAndStatus<>(null, kafkaRebalance.getStatus()));
+            LOGGER.infoCr(reconciliation, "Getting Cruise Control rebalance user task status");
+            Set<Condition> conditions = StatusUtils.validate(reconciliation, kafkaRebalance);
+            validateAnnotation(reconciliation, conditions, KafkaRebalanceState.Rebalancing, rebalanceAnnotation(kafkaRebalance), kafkaRebalance);
+            VertxUtil.completableFutureToVertxFuture(apiClient.getUserTaskStatus(reconciliation, host, cruiseControlPort, sessionId))
+                .onSuccess(cruiseControlResponse -> handleUserTaskStatusResponse(reconciliation, cruiseControlResponse, p, sessionId, conditions, kafkaRebalance, configMapOperator, false, host, apiClient, rebalanceOptionsBuilder))
+                .onFailure(e -> {
+                    LOGGER.errorCr(reconciliation, "Cruise Control getting rebalance task status failed", e);
+                    p.fail(e);
+                });
         }
         return p.future();
     }
@@ -1105,15 +1015,15 @@ public class KafkaRebalanceAssemblyOperator
      * @param reconciliation Reconciliation information
      * @param host Cruise Control service to which sending the rebalance proposal request
      * @param apiClient Cruise Control REST API client instance
-     * @param rebalanceAnnotation The current value for the strimzi.io/rebalance annotation
      * @param rebalanceOptionsBuilder builder for the Cruise Control REST API client options
      * @return a Future with the next {@code MapAndStatus<ConfigMap, KafkaRebalanceStatus>} bringing the ConfigMap and state.
      */
 
     private Future<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> onStop(Reconciliation reconciliation,
                                                                  String host, CruiseControlApi apiClient,
-                                                                 KafkaRebalance kafkaRebalance, KafkaRebalanceAnnotation rebalanceAnnotation,
+                                                                 KafkaRebalance kafkaRebalance,
                                                                  AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
+        KafkaRebalanceAnnotation rebalanceAnnotation = rebalanceAnnotation(kafkaRebalance);
         if (rebalanceAnnotation == KafkaRebalanceAnnotation.refresh) {
             return requestRebalance(reconciliation, host, apiClient, kafkaRebalance, true, rebalanceOptionsBuilder);
         } else {
@@ -1133,14 +1043,14 @@ public class KafkaRebalanceAssemblyOperator
      * @param reconciliation Reconciliation information
      * @param host Cruise Control service to which sending the rebalance proposal request
      * @param apiClient Cruise Control REST API client instance
-     * @param rebalanceAnnotation The current value for the strimzi.io/rebalance annotation
      * @param rebalanceOptionsBuilder builder for the Cruise Control REST API client options
      * @return a Future with the next {@code MapAndStatus<ConfigMap, KafkaRebalanceStatus>} bringing the ConfigMap and state
      */
     private Future<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> onReady(Reconciliation reconciliation,
                                                                     String host, CruiseControlApi apiClient,
-                                                                    KafkaRebalance kafkaRebalance, KafkaRebalanceAnnotation rebalanceAnnotation,
+                                                                    KafkaRebalance kafkaRebalance,
                                                                     AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
+        KafkaRebalanceAnnotation rebalanceAnnotation = rebalanceAnnotation(kafkaRebalance);
         if (rebalanceAnnotation == KafkaRebalanceAnnotation.refresh) {
             return requestRebalance(reconciliation, host, apiClient, kafkaRebalance, true, rebalanceOptionsBuilder);
         } else {
@@ -1154,28 +1064,23 @@ public class KafkaRebalanceAssemblyOperator
     /**
      * Reconcile loop for the KafkaRebalance
      */
-    /* test */ Future<Void> reconcileRebalance(Reconciliation reconciliation, KafkaRebalance kafkaRebalance) {
+    @SuppressWarnings({"checkstyle:NPathComplexity"})
+    /* test */ Future<KafkaRebalanceStatus> reconcileKafkaRebalance(Reconciliation reconciliation, KafkaRebalance kafkaRebalance) {
         if (kafkaRebalance == null) {
-            LOGGER.infoCr(reconciliation, "Rebalance resource deleted");
+            LOGGER.infoCr(reconciliation, "KafkaRebalance resource deleted");
             return Future.succeededFuture();
         }
 
-        if (kafkaRebalance.getStatus() != null
-                && kafkaRebalance.getStatus().getObservedGeneration() != kafkaRebalance.getMetadata().getGeneration()) {
-
-            KafkaRebalanceBuilder patchedKafkaRebalance = new KafkaRebalanceBuilder(kafkaRebalance);
-
-            patchedKafkaRebalance
-                    .editMetadata()
-                         .addToAnnotations(Map.of(ANNO_STRIMZI_IO_REBALANCE, KafkaRebalanceAnnotation.refresh.toString()))
-                    .endMetadata()
-                    .editStatus()
-                         .withObservedGeneration(kafkaRebalance.getMetadata().getGeneration())
-                    .endStatus();
-
-            kafkaRebalanceOperator.patchAsync(reconciliation, patchedKafkaRebalance.build()).onComplete(
-                    r -> LOGGER.debugCr(reconciliation, "The KafkaRebalance resource is updated with refresh annotation"));
+        boolean isTemplate = Annotations.booleanAnnotation(kafkaRebalance, ANNO_STRIMZI_IO_REBALANCE_TEMPLATE, false);
+        if (isTemplate) {
+            LOGGER.traceCr(reconciliation, "KafkaRebalance {} is a template configuration. Skipping it.", kafkaRebalance.getMetadata().getName());
+            return Future.succeededFuture();
         }
+
+        LOGGER.debugCr(reconciliation, "KafkaRebalance {} with status [{}] and {}={}",
+                kafkaRebalance.getMetadata().getName(),
+                KafkaRebalanceUtils.rebalanceState(kafkaRebalance.getStatus()),
+                ANNO_STRIMZI_IO_REBALANCE, rawRebalanceAnnotation(kafkaRebalance));
 
         String clusterName = kafkaRebalance.getMetadata().getLabels() == null ? null : kafkaRebalance.getMetadata().getLabels().get(Labels.STRIMZI_CLUSTER_LABEL);
         String clusterNamespace = kafkaRebalance.getMetadata().getNamespace();
@@ -1183,8 +1088,8 @@ public class KafkaRebalanceAssemblyOperator
             String errorString = "Resource lacks label '" + Labels.STRIMZI_CLUSTER_LABEL + "': No cluster related to a possible rebalance.";
             LOGGER.warnCr(reconciliation, errorString);
             KafkaRebalanceStatus status = new KafkaRebalanceStatus();
-            return updateStatus(reconciliation, kafkaRebalance, status,
-                    new InvalidResourceException(CruiseControlIssues.clusterLabelMissing.getMessage())).mapEmpty();
+            return Future.succeededFuture(updateStatus(kafkaRebalance, status,
+                    new InvalidResourceException(CruiseControlIssues.clusterLabelMissing.getMessage())));
         }
 
         // Get associated Kafka cluster state
@@ -1193,27 +1098,40 @@ public class KafkaRebalanceAssemblyOperator
                     if (kafka == null) {
                         LOGGER.warnCr(reconciliation, "Kafka resource '{}' identified by label '{}' does not exist in namespace {}.",
                                 clusterName, Labels.STRIMZI_CLUSTER_LABEL, clusterNamespace);
-                        return updateStatus(reconciliation, kafkaRebalance, new KafkaRebalanceStatus(),
+                        return Future.succeededFuture(updateStatus(kafkaRebalance, new KafkaRebalanceStatus(),
                                 new NoSuchResourceException("Kafka resource '" + clusterName
                                         + "' identified by label '" + Labels.STRIMZI_CLUSTER_LABEL
-                                        + "' does not exist in namespace " + clusterNamespace + ".")).mapEmpty();
-                    } else if (!isKafkaClusterReady(kafka) && state(kafkaRebalance) != (KafkaRebalanceState.Ready)) {
-                        LOGGER.warnCr(reconciliation, "Kafka cluster is not Ready");
-                        KafkaRebalanceStatus status = new KafkaRebalanceStatus();
-                        return updateStatus(reconciliation, kafkaRebalance, status,
-                                new RuntimeException(CruiseControlIssues.kafkaClusterNotReady.getMessage())).mapEmpty();
+                                        + "' does not exist in namespace " + clusterNamespace + ".")));
                     } else if (!Util.matchesSelector(kafkaSelector, kafka)) {
                         LOGGER.debugCr(reconciliation, "{} {} in namespace {} belongs to a Kafka cluster {} which does not match label selector {} and will be ignored", kind(), kafkaRebalance.getMetadata().getName(), clusterNamespace, clusterName, kafkaSelector.getMatchLabels());
-                        return Future.succeededFuture();
+                        return Future.succeededFuture(null);
+                    } else if (!isKafkaClusterReady(kafka) && KafkaRebalanceUtils.rebalanceState(kafkaRebalance.getStatus()) != KafkaRebalanceState.Ready) {
+                        LOGGER.warnCr(reconciliation, "Kafka cluster is not Ready");
+                        KafkaRebalanceStatus status = new KafkaRebalanceStatus();
+                        return Future.succeededFuture(updateStatus(kafkaRebalance, status,
+                                new RuntimeException(CruiseControlIssues.kafkaClusterNotReady.getMessage())));
                     } else if (kafka.getSpec().getCruiseControl() == null) {
                         LOGGER.warnCr(reconciliation, "Kafka resource lacks 'cruiseControl' declaration" + ": No deployed Cruise Control for doing a rebalance.");
                         KafkaRebalanceStatus status = new KafkaRebalanceStatus();
-                        return updateStatus(reconciliation, kafkaRebalance, status,
-                                new InvalidResourceException(CruiseControlIssues.cruiseControlDisabled.getMessage())).mapEmpty();
+                        return Future.succeededFuture(updateStatus(kafkaRebalance, status,
+                                new InvalidResourceException(CruiseControlIssues.cruiseControlDisabled.getMessage())));
                     }
 
-                    if (kafka.getSpec().getKafka().getStorage() instanceof JbodStorage) {
-                        usingJbodStorage = true;
+                    Future<KafkaRebalance> resourcePatchFuture;
+                    if (kafkaRebalance.getStatus() != null
+                            && kafkaRebalance.getStatus().getObservedGeneration() != kafkaRebalance.getMetadata().getGeneration()) {
+
+                        KafkaRebalanceBuilder patchedKafkaRebalance = new KafkaRebalanceBuilder(kafkaRebalance);
+
+                        patchedKafkaRebalance
+                                .editMetadata()
+                                    .addToAnnotations(Map.of(ANNO_STRIMZI_IO_REBALANCE, KafkaRebalanceAnnotation.refresh.toString()))
+                                .endMetadata();
+
+                        resourcePatchFuture = kafkaRebalanceOperator.patchAsync(reconciliation, patchedKafkaRebalance.build()).onComplete(
+                                r -> LOGGER.debugCr(reconciliation, "The KafkaRebalance resource is updated with refresh annotation"));
+                    } else {
+                        resourcePatchFuture = Future.succeededFuture();
                     }
 
                     String ccSecretName =  CruiseControlResources.secretName(clusterName);
@@ -1222,25 +1140,24 @@ public class KafkaRebalanceAssemblyOperator
                     Future<Secret> ccSecretFuture = secretOperations.getAsync(clusterNamespace, ccSecretName);
                     Future<Secret> ccApiSecretFuture = secretOperations.getAsync(clusterNamespace, ccApiSecretName);
 
-                    return Future.join(ccSecretFuture, ccApiSecretFuture)
+                    return Future.join(resourcePatchFuture, ccSecretFuture, ccApiSecretFuture)
                             .compose(compositeFuture -> {
-
-                                Secret ccSecret = compositeFuture.resultAt(0);
+                                Secret ccSecret = compositeFuture.resultAt(1);
                                 if (ccSecret == null) {
                                     return Future.failedFuture(Util.missingSecretException(clusterNamespace, ccSecretName));
                                 }
 
-                                Secret ccApiSecret = compositeFuture.resultAt(1);
+                                Secret ccApiSecret = compositeFuture.resultAt(2);
                                 if (ccApiSecret == null) {
                                     return Future.failedFuture(Util.missingSecretException(clusterNamespace, ccApiSecretName));
                                 }
 
-                                CruiseControlConfiguration ccConfig = new CruiseControlConfiguration(reconciliation, kafka.getSpec().getCruiseControl().getConfig().entrySet());
+                                CruiseControlConfiguration ccConfig = new CruiseControlConfiguration(reconciliation, kafka.getSpec().getCruiseControl().getConfig().entrySet(), Map.of());
                                 boolean apiAuthEnabled = ccConfig.isApiAuthEnabled();
                                 boolean apiSslEnabled = ccConfig.isApiSslEnabled();
                                 CruiseControlApi apiClient = cruiseControlClientProvider(ccSecret, ccApiSecret, apiAuthEnabled, apiSslEnabled);
 
-                                // get latest KafkaRebalance state as it may have changed
+                                // get latest KafkaRebalance state as it may have changed (see the patching above with "refresh" annotation)
                                 return kafkaRebalanceOperator.getAsync(kafkaRebalance.getMetadata().getNamespace(), kafkaRebalance.getMetadata().getName())
                                         .compose(currentKafkaRebalance -> {
                                             KafkaRebalanceStatus kafkaRebalanceStatus = currentKafkaRebalance.getStatus();
@@ -1249,20 +1166,16 @@ public class KafkaRebalanceAssemblyOperator
                                             if (kafkaRebalanceStatus == null) {
                                                 currentState = KafkaRebalanceState.New;
                                             } else {
-                                                String rebalanceStateType = rebalanceStateConditionType(kafkaRebalanceStatus);
-                                                if (rebalanceStateType == null) {
+                                                currentState = KafkaRebalanceUtils.rebalanceState(kafkaRebalanceStatus);
+                                                if (currentState == null) {
                                                     throw new RuntimeException("Unable to find KafkaRebalance State in current KafkaRebalance status");
                                                 }
-                                                currentState = KafkaRebalanceState.valueOf(rebalanceStateType);
                                             }
-                                            // Check annotation
-                                            KafkaRebalanceAnnotation rebalanceAnnotation = rebalanceAnnotation(currentKafkaRebalance);
-                                            return reconcile(reconciliation, cruiseControlHost(clusterName, clusterNamespace),
-                                                    apiClient, currentKafkaRebalance, currentState, rebalanceAnnotation).mapEmpty();
-
-                                        }, exception -> Future.failedFuture(exception).mapEmpty());
+                                            return handleRebalance(reconciliation, cruiseControlHost(clusterName, clusterNamespace),
+                                                    apiClient, currentKafkaRebalance, currentState);
+                                        }, exception -> Future.failedFuture(exception));
                             });
-                }, exception -> updateStatus(reconciliation, kafkaRebalance, new KafkaRebalanceStatus(), exception).mapEmpty());
+                }, exception -> Future.succeededFuture(updateStatus(kafkaRebalance, new KafkaRebalanceStatus(), exception)));
     }
 
     private boolean isKafkaClusterReady(Kafka kafka) {
@@ -1271,37 +1184,37 @@ public class KafkaRebalanceAssemblyOperator
                 && kafka.getStatus().getConditions().stream().anyMatch(condition -> condition.getType().equals("Ready") && condition.getStatus().equals("True"));
     }
 
-    private Future<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> requestRebalance(Reconciliation reconciliation,
-                                                          String host, CruiseControlApi apiClient, KafkaRebalance kafkaRebalance,
-                                                          boolean dryrun, AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
-        return requestRebalance(reconciliation, host, apiClient, kafkaRebalance, dryrun, rebalanceOptionsBuilder, null);
-    }
-
-
     private Future<MapAndStatus<ConfigMap, KafkaRebalanceStatus>> requestRebalance(Reconciliation reconciliation, String host, CruiseControlApi apiClient, KafkaRebalance kafkaRebalance,
                                                                                    boolean dryrun,
-                                                                                   AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder, String userTaskID) {
+                                                                                   AbstractRebalanceOptions.AbstractRebalanceOptionsBuilder<?, ?> rebalanceOptionsBuilder) {
 
         LOGGER.infoCr(reconciliation, "Requesting Cruise Control rebalance [dryrun={}]", dryrun);
-        rebalanceOptionsBuilder.withVerboseResponse();
-        if (!dryrun) {
-            rebalanceOptionsBuilder.withFullRun();
-        }
+
         // backward compatibility, no mode specified means "full"
         KafkaRebalanceMode mode = Optional.ofNullable(kafkaRebalance.getSpec())
                 .map(spec -> spec.getMode())
                 .orElse(KafkaRebalanceMode.FULL);
 
+        if (mode != KafkaRebalanceMode.REMOVE_DISKS) {
+            rebalanceOptionsBuilder.withVerboseResponse();
+        }
+        if (!dryrun) {
+            rebalanceOptionsBuilder.withFullRun();
+        }
+
         Future<CruiseControlRebalanceResponse> future;
         switch (mode) {
             case ADD_BROKERS:
-                future = apiClient.addBroker(host, CruiseControl.REST_API_PORT, ((AddBrokerOptions.AddBrokerOptionsBuilder) rebalanceOptionsBuilder).build(), userTaskID);
+                future = VertxUtil.completableFutureToVertxFuture(apiClient.addBroker(reconciliation, host, cruiseControlPort, ((AddBrokerOptions.AddBrokerOptionsBuilder) rebalanceOptionsBuilder).build(), null));
                 break;
             case REMOVE_BROKERS:
-                future = apiClient.removeBroker(host, CruiseControl.REST_API_PORT, ((RemoveBrokerOptions.RemoveBrokerOptionsBuilder) rebalanceOptionsBuilder).build(), userTaskID);
+                future = VertxUtil.completableFutureToVertxFuture(apiClient.removeBroker(reconciliation, host, cruiseControlPort, ((RemoveBrokerOptions.RemoveBrokerOptionsBuilder) rebalanceOptionsBuilder).build(), null));
+                break;
+            case REMOVE_DISKS:
+                future = VertxUtil.completableFutureToVertxFuture(apiClient.removeDisks(reconciliation, host, cruiseControlPort, ((RemoveDisksOptions.RemoveDisksOptionsBuilder) rebalanceOptionsBuilder).build(), null));
                 break;
             default:
-                future = apiClient.rebalance(host, CruiseControl.REST_API_PORT, ((RebalanceOptions.RebalanceOptionsBuilder) rebalanceOptionsBuilder).build(), userTaskID);
+                future = VertxUtil.completableFutureToVertxFuture(apiClient.rebalance(reconciliation, host, cruiseControlPort, ((RebalanceOptions.RebalanceOptionsBuilder) rebalanceOptionsBuilder).build(), null));
                 break;
         }
         return future.map(response -> handleRebalanceResponse(reconciliation, kafkaRebalance, dryrun, response));
@@ -1331,7 +1244,7 @@ public class KafkaRebalanceAssemblyOperator
             }
         }
 
-        if (response.getJson() != null && response.getJson().containsKey(CruiseControlRebalanceKeys.SUMMARY.getKey())) {
+        if (response.getJson() != null && response.getJson().has(CruiseControlRebalanceKeys.SUMMARY.getKey())) {
             // If there is enough data and the proposal is complete (the response has the "summary" key) then we move
             // to ProposalReady for a dry run or to the Rebalancing state for a full run
             KafkaRebalanceState ready = dryrun ? KafkaRebalanceState.ProposalReady : KafkaRebalanceState.Rebalancing;
@@ -1347,10 +1260,10 @@ public class KafkaRebalanceAssemblyOperator
      * If the annotation is not set it returns {@code RebalanceAnnotation.none} while if it's a not valid value, it
      * returns {@code RebalanceAnnotation.unknown}.
      *
-     * @param kafkaRebalance KafkaRebalance resource instance from which getting the value of the strimzio.io/rebalance annotation
-     * @return the {@code RebalanceAnnotation} enum value for the raw String value of the strimzio.io/rebalance annotation
+     * @param kafkaRebalance KafkaRebalance resource instance from which getting the value of the strimzi.io/rebalance annotation
+     * @return the {@code RebalanceAnnotation} enum value for the raw String value of the strimzi.io/rebalance annotation
      */
-    private KafkaRebalanceAnnotation rebalanceAnnotation(KafkaRebalance kafkaRebalance) {
+    /* test */ KafkaRebalanceAnnotation rebalanceAnnotation(KafkaRebalance kafkaRebalance) {
         String rebalanceAnnotationValue = rawRebalanceAnnotation(kafkaRebalance);
         KafkaRebalanceAnnotation rebalanceAnnotation;
 
@@ -1369,11 +1282,11 @@ public class KafkaRebalanceAssemblyOperator
     }
 
     /**
-     * Return the raw String value of the strimzio.io/rebalance annotation, if exists, on the provided
+     * Return the raw String value of the strimzi.io/rebalance annotation, if exists, on the provided
      * KafkaRebalance resource instance otherwise return null
      *
-     * @param kafkaRebalance KafkaRebalance resource instance from which getting the value of the strimzio.io/rebalance annotation
-     * @return the value for the strimzio.io/rebalance annotation on the provided KafkaRebalance resource instance
+     * @param kafkaRebalance KafkaRebalance resource instance from which getting the value of the strimzi.io/rebalance annotation
+     * @return the value for the strimzi.io/rebalance annotation on the provided KafkaRebalance resource instance
      */
     private String rawRebalanceAnnotation(KafkaRebalance kafkaRebalance) {
         return hasRebalanceAnnotation(kafkaRebalance) ?
@@ -1403,10 +1316,10 @@ public class KafkaRebalanceAssemblyOperator
     }
 
     /**
-     * Return true if the provided KafkaRebalance resource instance has the strimzio.io/rebalance annotation
+     * Return true if the provided KafkaRebalance resource instance has the strimzi.io/rebalance annotation
      *
      * @param kafkaRebalance KafkaRebalance resource instance to check
-     * @return if the provided KafkaRebalance resource instance has the strimzio.io/rebalance annotation
+     * @return if the provided KafkaRebalance resource instance has the strimzi.io/rebalance annotation
      */
     private boolean hasRebalanceAnnotation(KafkaRebalance kafkaRebalance) {
         return kafkaRebalance.getMetadata().getAnnotations() != null &&
@@ -1465,25 +1378,14 @@ public class KafkaRebalanceAssemblyOperator
         }
     }
 
-    private KafkaRebalanceState state(KafkaRebalance kafkaRebalance) {
-        KafkaRebalanceStatus rebalanceStatus = kafkaRebalance.getStatus();
-        if (rebalanceStatus != null) {
-            String statusString = rebalanceStateConditionType(rebalanceStatus);
-            if (statusString != null) {
-                return KafkaRebalanceState.valueOf(statusString);
-            }
-        }
-        return null;
-    }
-
     @Override
     protected Future<KafkaRebalanceStatus> createOrUpdate(Reconciliation reconciliation, KafkaRebalance resource) {
-        return reconcileRebalance(reconciliation, resource).map(v -> null);
+        return reconcileKafkaRebalance(reconciliation, resource);
     }
 
     @Override
     protected Future<Boolean> delete(Reconciliation reconciliation) {
-        return reconcileRebalance(reconciliation, null).map(v -> Boolean.TRUE);
+        return reconcileKafkaRebalance(reconciliation, null).map(v -> Boolean.TRUE);
     }
 
     @Override

@@ -13,7 +13,6 @@ import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.informers.SharedIndexInformer;
 import io.fabric8.kubernetes.client.informers.cache.Indexer;
 import io.strimzi.operator.cluster.model.securityprofiles.PodSecurityProviderFactory;
-import io.strimzi.operator.common.ShutdownHook;
 import io.strimzi.platform.KubernetesVersion;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
@@ -63,9 +62,7 @@ public class ClusterOperatorTest {
         env.put(ClusterOperatorConfig.FULL_RECONCILIATION_INTERVAL_MS.key(), "120000");
         env.put(ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES, KafkaVersionTestUtils.getKafkaImagesEnvVarString());
         env.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES, KafkaVersionTestUtils.getKafkaConnectImagesEnvVarString());
-        env.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMakerImagesEnvVarString());
         env.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMaker2ImagesEnvVarString());
-        env.put(ClusterOperatorConfig.FEATURE_GATES.key(), "-KafkaNodePools");
 
         if (podSetsOnly) {
             env.put(ClusterOperatorConfig.POD_SET_RECONCILIATION_ONLY.key(), "true");
@@ -152,7 +149,7 @@ public class ClusterOperatorTest {
                 return mockCmInformer;
             });
 
-            when(mockNamespacedCms.withLabels(any())).thenReturn(mockNamespacedCms);
+            when(mockNamespacedCms.withLabelSelector(any(LabelSelector.class))).thenReturn(mockNamespacedCms);
             when(mockCms.inNamespace(namespace)).thenReturn(mockNamespacedCms);
 
             // Mock Pods
@@ -180,7 +177,7 @@ public class ClusterOperatorTest {
             .onComplete(context.succeeding(v -> context.verify(() -> {
                 assertThat("A verticle per namespace", VERTX.deploymentIDs(), hasSize(namespaceList.size()));
                 for (String deploymentId: VERTX.deploymentIDs()) {
-                    VERTX.undeploy(deploymentId, asyncResult -> {
+                    VERTX.undeploy(deploymentId).onComplete(asyncResult -> {
                         if (asyncResult.failed()) {
                             LOGGER.error("Failed to undeploy {}", deploymentId);
                             context.failNow(asyncResult.cause());
@@ -232,7 +229,7 @@ public class ClusterOperatorTest {
         when(mockCmInformer.stopped()).thenReturn(CompletableFuture.completedFuture(null));
 
         AnyNamespaceOperation mockFilteredCms = mock(AnyNamespaceOperation.class);
-        when(mockFilteredCms.withLabels(any())).thenReturn(mockFilteredCms);
+        when(mockFilteredCms.withLabelSelector(any(LabelSelector.class))).thenReturn(mockFilteredCms);
         when(mockFilteredCms.watch(any())).thenAnswer(invo -> {
             numWatchers.incrementAndGet();
             Watch mockWatch = mock(Watch.class);
@@ -274,7 +271,7 @@ public class ClusterOperatorTest {
             .onComplete(context.succeeding(v -> context.verify(() -> {
                 assertThat("A verticle per namespace", VERTX.deploymentIDs(), hasSize(1));
                 for (String deploymentId: VERTX.deploymentIDs()) {
-                    VERTX.undeploy(deploymentId, asyncResult -> {
+                    VERTX.undeploy(deploymentId).onComplete(asyncResult -> {
                         if (asyncResult.failed()) {
                             LOGGER.error("Failed to undeploy {}", deploymentId);
                             context.failNow(asyncResult.cause());

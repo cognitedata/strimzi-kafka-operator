@@ -9,8 +9,14 @@ ARG strimzi_version
 ARG TARGETOS
 ARG TARGETARCH
 
-RUN microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install gettext nmap-ncat stunnel net-tools unzip hostname findutils tar \
-    && microdnf clean all
+LABEL name='kafka' \
+    version="${strimzi_version}-${KAFKA_VERSION}" \
+    release="${strimzi_version}" \
+    summary="Kafka ${KAFKA_VERSION} image of the Strimzi Kafka Operator project." \
+    description="Kafka image used by the Strimzi Kafka Operator to run Kafka ${KAFKA_VERSION} clusters."
+
+RUN microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install -y gettext nmap-ncat net-tools unzip hostname findutils tar \
+    && microdnf clean all -y
 
 # Add kafka user with UID 1001
 # The user is in the group 0 to have access to the mounted volumes and storage
@@ -25,16 +31,17 @@ ENV STRIMZI_VERSION=${strimzi_version}
 
 COPY $KAFKA_DIST_DIR $KAFKA_HOME
 COPY ./scripts/ $KAFKA_HOME
+RUN mkdir $KAFKA_HOME/plugins
 
 #####
 # Add Kafka Exporter
 #####
 ENV KAFKA_EXPORTER_HOME=/opt/kafka-exporter
-ENV KAFKA_EXPORTER_VERSION=1.7.0
-ENV KAFKA_EXPORTER_CHECKSUM_AMD64="1877f640baee81563c88dce935ad875b4bdfa83ba264bea24922573c8d8f994f0f661620c365fc51d1c3888a3f12f8c3564330f87ee491045f41b118ba5c4376  kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-amd64.tar.gz"
-ENV KAFKA_EXPORTER_CHECKSUM_ARM64="a532df77cd12eb7dc83d5822843da4d2d48c56e91fb694de8ccb4a2f7f19e7d25d23c375f31a3bc9e62e99b71ce18c3086fc990abc273b55d12360223093bb97  kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-arm64.tar.gz"
-ENV KAFKA_EXPORTER_CHECKSUM_PPC64LE="48ebb8e4879ea4320cd0a25cea76d38bff4664ef75a49d9dce22a40708389469d099c41c91b9fd32142356e8b9779ba2623739a59318fbf43b12a211b9285481  kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-ppc64le.tar.gz"
-ENV KAFKA_EXPORTER_CHECKSUM_S390X="7a80e10d08ebeeccb968c2c58db7886d1778eb1e9ea5130f88ef7379d8018499b9fef79ae416b7a312b165fd76fd3680bed984041cb8be9ec198f694ab37b5ff kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-s390x.tar.gz"
+ENV KAFKA_EXPORTER_VERSION=1.8.0
+ENV KAFKA_EXPORTER_CHECKSUM_AMD64="bb38dc2c0ce0dcbcf208beab0d75f323e05595486b43dd7d0d478c858621fec828d6070099b3972ac56b5adeaab34947ecf0947b8b3c4f6f8085af1b28043268  kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-amd64.tar.gz"
+ENV KAFKA_EXPORTER_CHECKSUM_ARM64="d5b1a8e351c75fc1bd0b6222ce96022558e7d039b99788471ba93a3825b8afe69a9cf9d2856d871a4707ddc62f50fa29b34a9a976077c505a1c26ff22678ac41  kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-arm64.tar.gz"
+ENV KAFKA_EXPORTER_CHECKSUM_PPC64LE="33d6a757536e09926c05ca750c36ffb7f2bf23f864c8172293d0c51ab4928f091c41216e9bfe967b3f496f338bcc3a73d1ca457fe213bc06725f566f636d6c39  kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-ppc64le.tar.gz"
+ENV KAFKA_EXPORTER_CHECKSUM_S390X="5dc868e15971017a79576856865bdca13fc3ac638ef7802390ead7acf06e69a0f1423b439a812fb026a0fcfd9ffc2e581af2729850de3509d335b5b5dca0d869 kafka_exporter-${KAFKA_EXPORTER_VERSION}.linux-s390x.tar.gz"
 
 RUN set -ex; \
     if [[ "${TARGETOS}/${TARGETARCH}" = "linux/arm64" ]]; then \
@@ -70,10 +77,24 @@ RUN set -ex; \
 COPY ./exporter-scripts $KAFKA_EXPORTER_HOME
 
 #####
+# Add Prometheus JMX Exporter
+#####
+ENV JMX_EXPORTER_HOME=/opt/prometheus-jmx-exporter
+ENV JMX_EXPORTER_VERSION=1.1.0
+ENV JMX_EXPORTER_CHECKSUM="63f9ff5297c6add9ecd19633a54300ffcec0df2e09afca7212e80506b801ea20aa009efc4b582b6ed8a4616b1ed68c98e30cc5b9dbf2cf6fe68b7cf2e3c5db3c  jmx_prometheus_javaagent-${JMX_EXPORTER_VERSION}.jar"
+
+RUN set -ex; \
+    curl -LO https://github.com/prometheus/jmx_exporter/releases/download/${JMX_EXPORTER_VERSION}/jmx_prometheus_javaagent-${JMX_EXPORTER_VERSION}.jar; \
+    echo $JMX_EXPORTER_CHECKSUM > jmx_prometheus_javaagent-${JMX_EXPORTER_VERSION}.jar.sha512; \
+    sha512sum --check jmx_prometheus_javaagent-${JMX_EXPORTER_VERSION}.jar.sha512; \
+    mkdir $JMX_EXPORTER_HOME; \
+    mv jmx_prometheus_javaagent-${JMX_EXPORTER_VERSION}.jar $JMX_EXPORTER_HOME/; \
+    rm -f jmx_prometheus_javaagent-${JMX_EXPORTER_VERSION}.jar.sha512;
+
+#####
 # Add Strimzi agents
 #####
 COPY ./tmp/kafka-agent-${STRIMZI_VERSION}.jar ${KAFKA_HOME}/libs/
-COPY ./tmp/mirror-maker-agent-${STRIMZI_VERSION}.jar ${KAFKA_HOME}/libs/
 COPY ./tmp/tracing-agent-${STRIMZI_VERSION}.jar ${KAFKA_HOME}/libs/
 
 #####
@@ -88,13 +109,6 @@ ENV CRUISE_CONTROL_HOME=/opt/cruise-control
 RUN mkdir $CRUISE_CONTROL_HOME
 COPY tmp/cc/ ${CRUISE_CONTROL_HOME}/libs/
 COPY ./cruise-control-scripts $CRUISE_CONTROL_HOME
-
-#####
-# Add Stunnel
-#####
-ENV STUNNEL_HOME=/opt/stunnel
-RUN mkdir $STUNNEL_HOME && mkdir -p -m g+rw /usr/local/var/run/
-COPY ./stunnel-scripts/ $STUNNEL_HOME
 
 WORKDIR $KAFKA_HOME
 

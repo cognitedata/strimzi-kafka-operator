@@ -32,32 +32,31 @@ import io.fabric8.kubernetes.api.model.rbac.RoleRef;
 import io.fabric8.kubernetes.api.model.rbac.RoleRefBuilder;
 import io.fabric8.kubernetes.api.model.rbac.Subject;
 import io.fabric8.kubernetes.api.model.rbac.SubjectBuilder;
-import io.strimzi.api.kafka.model.CertSecretSource;
-import io.strimzi.api.kafka.model.ClientTls;
-import io.strimzi.api.kafka.model.JvmOptions;
-import io.strimzi.api.kafka.model.KafkaConnect;
-import io.strimzi.api.kafka.model.KafkaConnectResources;
-import io.strimzi.api.kafka.model.KafkaConnectSpec;
-import io.strimzi.api.kafka.model.Probe;
-import io.strimzi.api.kafka.model.ProbeBuilder;
-import io.strimzi.api.kafka.model.Rack;
-import io.strimzi.api.kafka.model.StrimziPodSet;
-import io.strimzi.api.kafka.model.authentication.KafkaClientAuthentication;
+import io.strimzi.api.kafka.model.common.ClientTls;
+import io.strimzi.api.kafka.model.common.JvmOptions;
+import io.strimzi.api.kafka.model.common.Probe;
+import io.strimzi.api.kafka.model.common.ProbeBuilder;
+import io.strimzi.api.kafka.model.common.Rack;
+import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthentication;
+import io.strimzi.api.kafka.model.common.template.ContainerTemplate;
+import io.strimzi.api.kafka.model.common.template.DeploymentStrategy;
+import io.strimzi.api.kafka.model.common.template.DeploymentTemplate;
+import io.strimzi.api.kafka.model.common.template.InternalServiceTemplate;
+import io.strimzi.api.kafka.model.common.template.PodDisruptionBudgetTemplate;
+import io.strimzi.api.kafka.model.common.template.PodTemplate;
+import io.strimzi.api.kafka.model.common.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.common.tracing.JaegerTracing;
+import io.strimzi.api.kafka.model.common.tracing.OpenTelemetryTracing;
+import io.strimzi.api.kafka.model.common.tracing.Tracing;
 import io.strimzi.api.kafka.model.connect.ExternalConfiguration;
 import io.strimzi.api.kafka.model.connect.ExternalConfigurationEnv;
 import io.strimzi.api.kafka.model.connect.ExternalConfigurationEnvVarSource;
 import io.strimzi.api.kafka.model.connect.ExternalConfigurationVolumeSource;
-import io.strimzi.api.kafka.model.template.ContainerTemplate;
-import io.strimzi.api.kafka.model.template.DeploymentStrategy;
-import io.strimzi.api.kafka.model.template.DeploymentTemplate;
-import io.strimzi.api.kafka.model.template.InternalServiceTemplate;
-import io.strimzi.api.kafka.model.template.KafkaConnectTemplate;
-import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplate;
-import io.strimzi.api.kafka.model.template.PodTemplate;
-import io.strimzi.api.kafka.model.template.ResourceTemplate;
-import io.strimzi.api.kafka.model.tracing.JaegerTracing;
-import io.strimzi.api.kafka.model.tracing.OpenTelemetryTracing;
-import io.strimzi.api.kafka.model.tracing.Tracing;
+import io.strimzi.api.kafka.model.connect.KafkaConnect;
+import io.strimzi.api.kafka.model.connect.KafkaConnectResources;
+import io.strimzi.api.kafka.model.connect.KafkaConnectSpec;
+import io.strimzi.api.kafka.model.connect.KafkaConnectTemplate;
+import io.strimzi.api.kafka.model.podset.StrimziPodSet;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.model.jmx.JmxModel;
 import io.strimzi.operator.cluster.model.jmx.SupportsJmx;
@@ -79,7 +78,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static io.strimzi.api.kafka.model.template.DeploymentStrategy.ROLLING_UPDATE;
+import static io.strimzi.api.kafka.model.common.template.DeploymentStrategy.ROLLING_UPDATE;
 
 /**
  * Kafka Connect model class
@@ -102,7 +101,7 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
     protected static final String LOG_AND_METRICS_CONFIG_VOLUME_MOUNT = "/opt/kafka/custom-config/";
 
     // Configuration defaults
-    private static final Probe DEFAULT_HEALTHCHECK_OPTIONS = new ProbeBuilder().withInitialDelaySeconds(5).withInitialDelaySeconds(60).build();
+    private static final Probe DEFAULT_HEALTHCHECK_OPTIONS = new ProbeBuilder().withTimeoutSeconds(5).withInitialDelaySeconds(60).build();
 
     // Kafka Connect configuration keys (EnvVariables)
     protected static final String ENV_VAR_PREFIX = "KAFKA_CONNECT_";
@@ -121,6 +120,7 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
     protected static final String ENV_VAR_KAFKA_CONNECT_OAUTH_ACCESS_TOKEN = "KAFKA_CONNECT_OAUTH_ACCESS_TOKEN";
     protected static final String ENV_VAR_KAFKA_CONNECT_OAUTH_REFRESH_TOKEN = "KAFKA_CONNECT_OAUTH_REFRESH_TOKEN";
     protected static final String ENV_VAR_KAFKA_CONNECT_OAUTH_PASSWORD_GRANT_PASSWORD = "KAFKA_CONNECT_OAUTH_PASSWORD_GRANT_PASSWORD";
+    protected static final String ENV_VAR_KAFKA_CONNECT_OAUTH_CLIENT_ASSERTION = "KAFKA_CONNECT_OAUTH_CLIENT_ASSERTION";
     protected static final String ENV_VAR_STRIMZI_TRACING = "STRIMZI_TRACING";
 
     protected static final String CO_ENV_VAR_CUSTOM_CONNECT_POD_LABELS = "STRIMZI_CUSTOM_KAFKA_CONNECT_LABELS";
@@ -132,7 +132,10 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
     protected String loggingAndMetricsConfigMapName;
 
     protected String bootstrapServers;
+    @SuppressWarnings("deprecation") // External Configuration environment variables are deprecated
     protected List<ExternalConfigurationEnv> externalEnvs = Collections.emptyList();
+
+    @SuppressWarnings("deprecation") // External Configuration volumes are deprecated
     protected List<ExternalConfigurationVolumeSource> externalVolumes = Collections.emptyList();
     protected Tracing tracing;
     protected JmxModel jmx;
@@ -169,7 +172,7 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
      * @param sharedEnvironmentProvider Shared environment provider
      */
     protected KafkaConnectCluster(Reconciliation reconciliation, HasMetadata resource, SharedEnvironmentProvider sharedEnvironmentProvider) {
-        this(reconciliation, resource, KafkaConnectResources.deploymentName(resource.getMetadata().getName()), COMPONENT_TYPE, sharedEnvironmentProvider);
+        this(reconciliation, resource, KafkaConnectResources.componentName(resource.getMetadata().getName()), COMPONENT_TYPE, sharedEnvironmentProvider);
     }
 
     /**
@@ -374,14 +377,17 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
         }
 
         if (tls != null) {
-            VolumeUtils.createSecretVolume(volumeList, tls.getTrustedCertificates(), isOpenShift);
+            CertUtils.createTrustedCertificatesVolumes(volumeList, tls.getTrustedCertificates(), isOpenShift);
         }
         AuthenticationUtils.configureClientAuthenticationVolumes(authentication, volumeList, "oauth-certs", isOpenShift);
         volumeList.addAll(getExternalConfigurationVolumes(isOpenShift));
+        
+        TemplateUtils.addAdditionalVolumes(templatePod, volumeList);
 
         return volumeList;
     }
 
+    @SuppressWarnings("deprecation") // External Configuration volumes are deprecated
     private List<Volume> getExternalConfigurationVolumes(boolean isOpenShift)  {
         int mode = 0444;
         if (isOpenShift) {
@@ -435,14 +441,24 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
         }
 
         if (tls != null) {
-            VolumeUtils.createSecretVolumeMount(volumeMountList, tls.getTrustedCertificates(), TLS_CERTS_BASE_VOLUME_MOUNT);
+            CertUtils.createTrustedCertificatesVolumeMounts(volumeMountList, tls.getTrustedCertificates(), TLS_CERTS_BASE_VOLUME_MOUNT);
         }
         AuthenticationUtils.configureClientAuthenticationVolumeMounts(authentication, volumeMountList, TLS_CERTS_BASE_VOLUME_MOUNT, PASSWORD_VOLUME_MOUNT, OAUTH_TLS_CERTS_BASE_VOLUME_MOUNT, "oauth-certs");
         volumeMountList.addAll(getExternalConfigurationVolumeMounts());
 
+        TemplateUtils.addAdditionalVolumeMounts(volumeMountList, templateContainer);
+
+        return volumeMountList;
+    }
+    
+    private List<VolumeMount> getInitContainerVolumeMounts() {
+        List<VolumeMount> volumeMountList = new ArrayList<>();
+        volumeMountList.add(VolumeUtils.createVolumeMount(INIT_VOLUME_NAME, INIT_VOLUME_MOUNT));
+        TemplateUtils.addAdditionalVolumeMounts(volumeMountList, templateInitContainer);
         return volumeMountList;
     }
 
+    @SuppressWarnings("deprecation") // External Configuration volumes are deprecated
     private List<VolumeMount> getExternalConfigurationVolumeMounts()    {
         List<VolumeMount> volumeMountList = new ArrayList<>(0);
 
@@ -509,15 +525,10 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
                 templatePodSet,
                 replicas,
                 podSetAnnotations,
-                // The Kafka Connect / Mirror Maker 2 requires to use a selector with the PodSetController. This is
-                // required because of how it migrates from Deployment to PodSets and the other way around, where the
-                // old pods are deleted and new pods are created as part of the migration. This differs form Kafka and
-                // ZooKeeper, because when migrating from StatefulSet to PodSet or the other way around, the pods are
-                // re-used as they share the pod names.
                 labels.strimziSelectorLabels().withStrimziPodSetController(componentName),
                 podId -> WorkloadUtils.createStatefulPod(
                         reconciliation,
-                        getPodName(podId),
+                        componentName + "-" + podId,
                         namespace,
                         labels,
                         componentName,
@@ -546,7 +557,7 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
                     resources,
                     getInitContainerEnvVars(),
                     null,
-                    List.of(VolumeUtils.createVolumeMount(INIT_VOLUME_NAME, INIT_VOLUME_MOUNT)),
+                    getInitContainerVolumeMounts(),
                     null,
                     null,
                     imagePullPolicy
@@ -633,22 +644,12 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
     private void populateTLSEnvVars(final List<EnvVar> varList) {
         varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_CONNECT_TLS, "true"));
 
-        List<CertSecretSource> trustedCertificates = tls.getTrustedCertificates();
-
-        if (trustedCertificates != null && trustedCertificates.size() > 0) {
-            StringBuilder sb = new StringBuilder();
-            boolean separator = false;
-            for (CertSecretSource certSecretSource : trustedCertificates) {
-                if (separator) {
-                    sb.append(";");
-                }
-                sb.append(certSecretSource.getSecretName()).append("/").append(certSecretSource.getCertificate());
-                separator = true;
-            }
-            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_CONNECT_TRUSTED_CERTS, sb.toString()));
+        if (tls.getTrustedCertificates() != null && !tls.getTrustedCertificates().isEmpty()) {
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_CONNECT_TRUSTED_CERTS, CertUtils.trustedCertsEnvVar(tls.getTrustedCertificates())));
         }
     }
 
+    @SuppressWarnings("deprecation") // External Configuration environment variables are deprecated
     private List<EnvVar> getExternalConfigurationEnvVars()   {
         List<EnvVar> varList = new ArrayList<>();
 
@@ -880,7 +881,7 @@ public class KafkaConnectCluster extends AbstractModel implements SupportsMetric
         return logging;
     }
 
-     /**
+    /**
      * @return  Returns the preferred Deployment Strategy. This is used for the migration form Deployment to
      * StrimziPodSet or the other way around
      */

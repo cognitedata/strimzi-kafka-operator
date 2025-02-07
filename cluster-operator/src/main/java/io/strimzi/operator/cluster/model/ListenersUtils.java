@@ -4,15 +4,17 @@
  */
 package io.strimzi.operator.cluster.model;
 
-import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationCustom;
-import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationOAuth;
-import io.strimzi.api.kafka.model.listener.NodeAddressType;
-import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListener;
-import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerConfigurationBroker;
-import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
-import io.strimzi.api.kafka.model.template.ExternalTrafficPolicy;
-import io.strimzi.api.kafka.model.template.IpFamily;
-import io.strimzi.api.kafka.model.template.IpFamilyPolicy;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import io.strimzi.api.kafka.model.common.template.ExternalTrafficPolicy;
+import io.strimzi.api.kafka.model.common.template.IpFamily;
+import io.strimzi.api.kafka.model.common.template.IpFamilyPolicy;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListener;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerConfiguration;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerConfigurationBroker;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerAuthenticationCustom;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerAuthenticationOAuth;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
+import io.strimzi.api.kafka.model.kafka.listener.NodeAddressType;
 
 import java.util.Collections;
 import java.util.List;
@@ -45,7 +47,7 @@ public class ListenersUtils {
      *
      * @param listener  Listener to check
      *
-     * @return  True if the listener uses OAuth authentication. False otherwise.
+     * @return  True if the listener is configured to use OAuth authentication. False otherwise.
      */
     public static boolean isListenerWithOAuth(GenericKafkaListener listener) {
         if (listener.getAuth() == null || listener.getAuth().getType() == null)
@@ -257,13 +259,7 @@ public class ListenersUtils {
      * @return          Name of the bootstrap service
      */
     public static String backwardsCompatibleBootstrapServiceName(String clusterName, GenericKafkaListener listener) {
-        if (listener.getPort() == 9092 && "plain".equals(listener.getName()) && KafkaListenerType.INTERNAL == listener.getType())   {
-            return clusterName + "-kafka-bootstrap";
-        } else if (listener.getPort() == 9093 && "tls".equals(listener.getName()) && KafkaListenerType.INTERNAL == listener.getType())   {
-            return clusterName + "-kafka-bootstrap";
-        } else if (listener.getPort() == 9094 && "external".equals(listener.getName()))   {
-            return clusterName + "-kafka-external-bootstrap";
-        } else if (KafkaListenerType.INTERNAL == listener.getType()) {
+        if (KafkaListenerType.INTERNAL == listener.getType()) {
             return clusterName + "-kafka-bootstrap";
         } else {
             return clusterName + "-kafka-" + listener.getName() + "-bootstrap";
@@ -278,14 +274,10 @@ public class ListenersUtils {
      * @return          Name of the bootstrap service
      */
     public static String backwardsCompatibleBootstrapRouteOrIngressName(String clusterName, GenericKafkaListener listener) {
-        if (listener.getPort() == 9092 && "plain".equals(listener.getName()) && KafkaListenerType.INTERNAL == listener.getType())   {
-            throw new UnsupportedOperationException("Bootstrap routes or ingresses are not used for internal listeners");
-        } else if (listener.getPort() == 9093 && "tls".equals(listener.getName()) && KafkaListenerType.INTERNAL == listener.getType())   {
+        if (KafkaListenerType.INTERNAL == listener.getType()) {
             throw new UnsupportedOperationException("Bootstrap routes or ingresses are not used for internal listeners");
         } else if (listener.getPort() == 9094 && "external".equals(listener.getName()))   {
             return clusterName + "-kafka-bootstrap";
-        } else if (KafkaListenerType.INTERNAL == listener.getType()) {
-            throw new UnsupportedOperationException("Bootstrap routes or ingresses are not used for internal listeners");
         } else {
             return clusterName + "-kafka-" + listener.getName() + "-bootstrap";
         }
@@ -304,14 +296,10 @@ public class ListenersUtils {
      * @return          Name of the bootstrap service
      */
     public static String backwardsCompatiblePerBrokerServiceName(String baseName, int pod, GenericKafkaListener listener) {
-        if (listener.getPort() == 9092 && "plain".equals(listener.getName()) && KafkaListenerType.INTERNAL == listener.getType())   {
-            throw new UnsupportedOperationException("Per-broker services are not used for internal listener");
-        } else if (listener.getPort() == 9093 && "tls".equals(listener.getName()) && KafkaListenerType.INTERNAL == listener.getType())   {
+        if (KafkaListenerType.INTERNAL == listener.getType()) {
             throw new UnsupportedOperationException("Per-broker services are not used for internal listener");
         } else if (listener.getPort() == 9094 && "external".equals(listener.getName()))   {
             return baseName + "-" + pod;
-        } else if (KafkaListenerType.INTERNAL == listener.getType()) {
-            throw new UnsupportedOperationException("Per-broker services are not used for internal listener");
         } else {
             return baseName + "-" + listener.getName() + "-" + pod;
         }
@@ -475,17 +463,31 @@ public class ListenersUtils {
     }
 
     /**
-     * Finds broker host configuration
+     * Replaces the template fields in the template string with the corresponding values from the node reference.
      *
-     * @param listener  Listener for which the host should be found
-     * @param pod       Pod ID for which we should get the configuration option
-     * @return          Host or null if not specified
+     * @param template  Template with the placeholders
+     * @param node      Node reference that should be used to provide the final values
+     *
+     * @return  The rendered template
      */
-    public static String brokerHost(GenericKafkaListener listener, int pod)    {
-        if (listener.getConfiguration() != null
-                && listener.getConfiguration().getBrokers() != null) {
-            return listener.getConfiguration().getBrokers().stream()
-                    .filter(broker -> broker != null && broker.getBroker() != null && broker.getBroker() == pod && broker.getHost() != null)
+    /* test */ static String renderHostTemplate(String template, NodeRef node) {
+        return template
+                .replace("{nodeId}", Integer.toString(node.nodeId()))
+                .replace("{nodePodName}", node.podName());
+    }
+
+    /**
+     * Finds per-broker host configuration based on node ID.
+     *
+     * @param listenerConfiguration     Configuration of the listener for which the host should be found
+     * @param nodeId                    Node ID for which we should get the configuration option
+     *
+     * @return  Host configured for given node ID or null if not specified
+     */
+    private static String brokerHost(GenericKafkaListenerConfiguration listenerConfiguration, int nodeId)    {
+        if (listenerConfiguration.getBrokers() != null) {
+            return listenerConfiguration.getBrokers().stream()
+                    .filter(broker -> broker != null && broker.getBroker() != null && broker.getBroker() == nodeId && broker.getHost() != null)
                     .map(GenericKafkaListenerConfigurationBroker::getHost)
                     .findAny()
                     .orElse(null);
@@ -495,20 +497,68 @@ public class ListenersUtils {
     }
 
     /**
-     * Finds broker advertised host configuration
+     * Finds broker host configuration either in the per-broker configuration or renders it from the template. If no
+     * per-broker value and no template are set, it returns null.
      *
-     * @param listener  Listener for which the advertised host should be found
-     * @param pod       Pod ID for which we should get the configuration option
-     * @return          Advertised Host or null if not specified
+     * @param listener  Listener for which the host should be found
+     * @param node      Node reference describing the node for which we want to find the host
+     *
+     * @return          Host or null if not specified
      */
-    public static String brokerAdvertisedHost(GenericKafkaListener listener, int pod)    {
-        if (listener.getConfiguration() != null
-                && listener.getConfiguration().getBrokers() != null) {
-            return listener.getConfiguration().getBrokers().stream()
-                    .filter(broker -> broker != null && broker.getBroker() != null && broker.getBroker() == pod && broker.getAdvertisedHost() != null)
+    public static String brokerHost(GenericKafkaListener listener, NodeRef node)    {
+        if (listener.getConfiguration() != null)    {
+            String host = brokerHost(listener.getConfiguration(), node.nodeId());
+
+            if (host == null && listener.getConfiguration().getHostTemplate() != null)   {
+                // There is no host defined specifically for given broker, so we try to use the template
+                host = renderHostTemplate(listener.getConfiguration().getHostTemplate(), node);
+            }
+
+            return host;
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Finds per-broker advertised host configuration based on node ID.
+     *
+     * @param listenerConfiguration     Configuration of the listener for which the advertised host should be found
+     * @param nodeId                    Node ID for which we should get the configuration option
+     *
+     * @return  Advertised Host or null if not specified
+     */
+    private static String brokerAdvertisedHost(GenericKafkaListenerConfiguration listenerConfiguration, int nodeId)    {
+        if (listenerConfiguration.getBrokers() != null) {
+            return listenerConfiguration.getBrokers().stream()
+                    .filter(broker -> broker != null && broker.getBroker() != null && broker.getBroker() == nodeId && broker.getAdvertisedHost() != null)
                     .map(GenericKafkaListenerConfigurationBroker::getAdvertisedHost)
                     .findAny()
                     .orElse(null);
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Finds broker advertised host configuration either in the per-broker configuration or renders it from the template. If no
+     * per-broker value and no template are set, it returns null.
+     *
+     * @param listener  Listener for which the advertised host should be found
+     * @param node      The node for which the advertised hostname should be obtained
+     *
+     * @return  Advertised Host or null if not specified
+     */
+    public static String brokerAdvertisedHost(GenericKafkaListener listener, NodeRef node)    {
+        if (listener.getConfiguration() != null)    {
+            String advertisedHost = brokerAdvertisedHost(listener.getConfiguration(), node.nodeId());
+
+            if (advertisedHost == null && listener.getConfiguration().getAdvertisedHostTemplate() != null)   {
+                // There is no advertised host defined specifically for given broker, so we try to use the template
+                advertisedHost = renderHostTemplate(listener.getConfiguration().getAdvertisedHostTemplate(), node);
+            }
+
+            return advertisedHost;
         } else {
             return null;
         }
@@ -574,6 +624,16 @@ public class ListenersUtils {
         } else {
             return null;
         }
+    }
+    
+    /**
+     * Finds publish not ready addresses configuration
+     *
+     * @param listener  Listener for which the publish not ready addresses value should be found
+     * @return          publish not ready addresses value or null if not specified
+     */
+    public static Boolean publishNotReadyAddresses(GenericKafkaListener listener)    {
+        return listener.getConfiguration() == null ? null : listener.getConfiguration().getPublishNotReadyAddresses();
     }
 
     /**
@@ -661,28 +721,6 @@ public class ListenersUtils {
         }
     }
 
-
-    /**
-     * Returns the advertised host for given broker. If user specified some override in the listener configuration, it
-     * will return this override. If no override is specified, it will return the host obtained from Kubernetes
-     * passes as parameter to this method.
-     *
-     * @param listener  Listener where the configuration should be found
-     * @param nodeId    Kafka node ID
-     * @param hostname  The advertised hostname which will be used if there is no listener override
-     *
-     * @return  The advertised hostname
-     */
-    public static String advertisedHostnameFromOverrideOrParameter(GenericKafkaListener listener, int nodeId, String hostname) {
-        String advertisedHost = ListenersUtils.brokerAdvertisedHost(listener, nodeId);
-
-        if (advertisedHost == null && hostname == null)  {
-            return null;
-        }
-
-        return advertisedHost != null ? advertisedHost : hostname;
-    }
-
     /**
      * Returns the advertised port for given broker. If user specified some override in the listener configuration, it
      * will return this override. If no override is specified, it will return the port obtained from Kubernetes
@@ -698,5 +736,49 @@ public class ListenersUtils {
         Integer advertisedPort = ListenersUtils.brokerAdvertisedPort(listener, nodeId);
 
         return String.valueOf(advertisedPort != null ? advertisedPort : port);
+    }
+
+    /**
+     * Returns bootstrap service external IPs
+     * 
+     * @param listener  Listener for which the external IPs should be found
+     * 
+     * @return  External IPs or null if not specified
+     */
+    public static List<String> bootstrapExternalIPs(GenericKafkaListener listener) {
+        return (listener.getConfiguration() != null && listener.getConfiguration().getBootstrap() != null)
+            ? listener.getConfiguration().getBootstrap().getExternalIPs()
+                : null;
+    }
+
+    /**
+     * Returns broker service external IPs
+     * 
+     * @param listener  Listener for which the external IPs should be found
+     * @param nodeId       Node ID for which we should get the configuration option
+     * 
+     * @return          External IPs or null if not specified
+     */
+    public static List<String> brokerExternalIPs(GenericKafkaListener listener, int nodeId) {
+        return (listener.getConfiguration() != null && listener.getConfiguration().getBrokers() != null)
+                ? listener.getConfiguration().getBrokers().stream()
+                    .filter(broker -> broker != null && broker.getBroker() != null && broker.getBroker() == nodeId && broker.getExternalIPs() != null)
+                    .map(GenericKafkaListenerConfigurationBroker::getExternalIPs)
+                    .findAny()
+                    .orElse(null) : null;
+    }
+
+    /**
+     * Returns whether to allocate NodePorts for LoadBalancer Service type
+     *
+     * @param listener Listener for which to allocate NodePorts
+     * @return         Whether to allocate NodePorts for Service
+     */
+    @SuppressFBWarnings(value = {"NP_BOOLEAN_RETURN_NULL"}, justification = "Null is being checked by the caller, so " +
+                                                                            "the Service defaults can takeover properly")
+    public static Boolean allocateLoadBalancerNodePorts(GenericKafkaListener listener) {
+        return listener.getConfiguration() != null ?
+                listener.getConfiguration().getAllocateLoadBalancerNodePorts() :
+                null;
     }
 }

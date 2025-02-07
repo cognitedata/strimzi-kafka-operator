@@ -7,14 +7,14 @@ package io.strimzi.operator.cluster.model.securityprofiles;
 import io.fabric8.kubernetes.api.model.PodSecurityContext;
 import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.SecurityContextBuilder;
-import io.strimzi.api.kafka.model.storage.EphemeralStorage;
-import io.strimzi.api.kafka.model.storage.JbodStorageBuilder;
-import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
-import io.strimzi.api.kafka.model.storage.Storage;
-import io.strimzi.api.kafka.model.template.ContainerTemplate;
-import io.strimzi.api.kafka.model.template.ContainerTemplateBuilder;
-import io.strimzi.api.kafka.model.template.PodTemplate;
-import io.strimzi.api.kafka.model.template.PodTemplateBuilder;
+import io.strimzi.api.kafka.model.common.template.ContainerTemplate;
+import io.strimzi.api.kafka.model.common.template.ContainerTemplateBuilder;
+import io.strimzi.api.kafka.model.common.template.PodTemplate;
+import io.strimzi.api.kafka.model.common.template.PodTemplateBuilder;
+import io.strimzi.api.kafka.model.kafka.EphemeralStorage;
+import io.strimzi.api.kafka.model.kafka.JbodStorageBuilder;
+import io.strimzi.api.kafka.model.kafka.PersistentClaimStorageBuilder;
+import io.strimzi.api.kafka.model.kafka.Storage;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.platform.KubernetesVersion;
 import io.strimzi.platform.PlatformFeatures;
@@ -63,10 +63,6 @@ public class BaselinePodSecurityProviderTest {
         PodSecurityProvider provider = createProvider();
         provider.configure(ON_OPENSHIFT);
 
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -96,11 +92,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
 
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -111,10 +102,6 @@ public class BaselinePodSecurityProviderTest {
     public void testPodContextWithUserProvidedContextOnOpenShift() {
         PodSecurityProvider provider = createProvider();
         provider.configure(ON_OPENSHIFT);
-
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
 
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
@@ -145,11 +132,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
 
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(null, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(null, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
@@ -160,10 +142,6 @@ public class BaselinePodSecurityProviderTest {
     public void testPodContextOnKubernetes() {
         PodSecurityProvider provider = createProvider();
         provider.configure(ON_KUBERNETES);
-
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(DEFAULT_KUBE_POD_SECURITY_CONTEXT));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(DEFAULT_KUBE_POD_SECURITY_CONTEXT));
 
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(DEFAULT_KUBE_POD_SECURITY_CONTEXT));
@@ -194,11 +172,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
 
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -209,10 +182,6 @@ public class BaselinePodSecurityProviderTest {
     public void testPodContextOnKubernetesWithEmptyTemplate() {
         PodSecurityProvider provider = createProvider();
         provider.configure(ON_KUBERNETES);
-
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, new PodTemplate())), CoreMatchers.is(DEFAULT_KUBE_POD_SECURITY_CONTEXT));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, new PodTemplate())), CoreMatchers.is(DEFAULT_KUBE_POD_SECURITY_CONTEXT));
 
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, new PodTemplate())), CoreMatchers.is(DEFAULT_KUBE_POD_SECURITY_CONTEXT));
@@ -243,11 +212,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
 
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(null, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(null, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, new PodTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -258,10 +222,6 @@ public class BaselinePodSecurityProviderTest {
     public void testPodContextWithUserProvidedContextOnKubernetes() {
         PodSecurityProvider provider = createProvider();
         provider.configure(ON_KUBERNETES);
-
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
 
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.kafkaPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
@@ -292,11 +252,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.kafkaConnectBuildPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
 
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(null, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.kafkaMirrorMakerPodSecurityContext(new PodSecurityProviderContextImpl(JBOD, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
-
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(null, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(EPHEMERAL, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.bridgePodSecurityContext(new PodSecurityProviderContextImpl(PERSISTENT, CUSTOM_POD_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_POD_SECURITY_CONTEXT.getSecurityContext()));
@@ -307,11 +262,6 @@ public class BaselinePodSecurityProviderTest {
     public void testContainerContext() {
         PodSecurityProvider provider = createProvider();
         provider.configure(ON_KUBERNETES);
-
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
 
         assertThat(provider.kafkaContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -333,11 +283,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.entityUserOperatorContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.entityUserOperatorContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
 
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-
         assertThat(provider.kafkaExporterContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaExporterContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaExporterContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -358,11 +303,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.kafkaConnectInitContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaConnectInitContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
 
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, null)), CoreMatchers.is(CoreMatchers.nullValue()));
-
         assertThat(provider.bridgeContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgeContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, null)), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgeContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, null)), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -378,11 +318,6 @@ public class BaselinePodSecurityProviderTest {
     public void testContainerContextWithEmptyTemplate() {
         PodSecurityProvider provider = createProvider();
         provider.configure(ON_KUBERNETES);
-
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
 
         assertThat(provider.kafkaContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -404,11 +339,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.entityUserOperatorContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.entityUserOperatorContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
 
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-
         assertThat(provider.kafkaExporterContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaExporterContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaExporterContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -429,11 +359,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.kafkaConnectInitContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.kafkaConnectInitContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
 
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
-
         assertThat(provider.bridgeContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgeContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
         assertThat(provider.bridgeContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, new ContainerTemplate())), CoreMatchers.is(CoreMatchers.nullValue()));
@@ -449,11 +374,6 @@ public class BaselinePodSecurityProviderTest {
     public void testRestrictedContainerContextWithUserProvidedContext() {
         PodSecurityProvider provider = createProvider();
         provider.configure(ON_KUBERNETES);
-
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
 
         assertThat(provider.kafkaContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.kafkaContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
@@ -475,11 +395,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.entityUserOperatorContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.entityUserOperatorContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
 
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.entityOperatorTlsSidecarContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-
         assertThat(provider.kafkaExporterContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.kafkaExporterContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.kafkaExporterContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
@@ -499,11 +414,6 @@ public class BaselinePodSecurityProviderTest {
         assertThat(provider.kafkaConnectInitContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.kafkaConnectInitContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.kafkaConnectInitContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(PERSISTENT, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
-        assertThat(provider.kafkaMirrorMakerContainerSecurityContext(new ContainerSecurityProviderContextImpl(JBOD, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
 
         assertThat(provider.bridgeContainerSecurityContext(new ContainerSecurityProviderContextImpl(null, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));
         assertThat(provider.bridgeContainerSecurityContext(new ContainerSecurityProviderContextImpl(EPHEMERAL, CUSTOM_CONTAINER_SECURITY_CONTEXT)), CoreMatchers.is(CUSTOM_CONTAINER_SECURITY_CONTEXT.getSecurityContext()));

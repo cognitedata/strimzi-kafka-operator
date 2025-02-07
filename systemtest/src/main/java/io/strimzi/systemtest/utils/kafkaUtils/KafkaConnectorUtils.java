@@ -4,10 +4,13 @@
  */
 package io.strimzi.systemtest.utils.kafkaUtils;
 
-import io.strimzi.api.kafka.model.KafkaConnectResources;
-import io.strimzi.api.kafka.model.KafkaConnector;
-import io.strimzi.api.kafka.model.status.KafkaConnectorStatus;
-import io.strimzi.systemtest.Constants;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.strimzi.api.kafka.model.connect.KafkaConnectResources;
+import io.strimzi.api.kafka.model.connector.KafkaConnector;
+import io.strimzi.api.kafka.model.connector.KafkaConnectorStatus;
+import io.strimzi.systemtest.TestConstants;
 import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.ResourceOperation;
 import io.strimzi.systemtest.resources.crd.KafkaConnectorResource;
@@ -20,7 +23,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static io.strimzi.systemtest.Constants.GLOBAL_RECONCILIATION_COUNT;
+import static io.strimzi.systemtest.TestConstants.GLOBAL_RECONCILIATION_COUNT;
 import static io.strimzi.systemtest.enums.CustomResourceStatus.NotReady;
 import static io.strimzi.systemtest.enums.CustomResourceStatus.Ready;
 import static io.strimzi.test.k8s.KubeClusterResource.cmdKubeClient;
@@ -43,13 +46,13 @@ public class KafkaConnectorUtils {
         // not need to be final because reference to the array does not get another array assigned
         int[] i = {0};
 
-        TestUtils.waitFor("stability of KafkaConnector: " + namespaceName + "/" + connectorName, Constants.GLOBAL_POLL_INTERVAL, Constants.KAFKA_CONNECTOR_STABILITY_TIMEOUT,
+        TestUtils.waitFor("stability of KafkaConnector: " + namespaceName + "/" + connectorName, TestConstants.GLOBAL_POLL_INTERVAL, TestConstants.KAFKA_CONNECTOR_STABILITY_TIMEOUT,
             () -> {
                 String availableConnectors = getCreatedConnectors(namespaceName, connectPodName);
                 if (availableConnectors.contains(connectorName)) {
                     LOGGER.info("KafkaConnector: {}/{} is present. Must remain stable for: {} second(s)", namespaceName, connectorName,
-                            Constants.GLOBAL_RECONCILIATION_COUNT - i[0]);
-                    return i[0]++ == (Constants.GLOBAL_RECONCILIATION_COUNT);
+                            TestConstants.GLOBAL_RECONCILIATION_COUNT - i[0]);
+                    return i[0]++ == (TestConstants.GLOBAL_RECONCILIATION_COUNT);
                 } else {
                     throw new RuntimeException("KafkaConnector" + namespaceName + "/" + connectorName + " is not stable!");
                 }
@@ -83,7 +86,7 @@ public class KafkaConnectorUtils {
     }
 
     public static void waitForConnectorDeletion(String namespaceName, String connectorName) {
-        TestUtils.waitFor(connectorName + " connector deletion", Constants.GLOBAL_POLL_INTERVAL, READINESS_TIMEOUT, () -> {
+        TestUtils.waitFor(connectorName + " connector deletion", TestConstants.GLOBAL_POLL_INTERVAL, READINESS_TIMEOUT, () -> {
             if (KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName).withName(connectorName).get() == null) {
                 return true;
             } else {
@@ -104,7 +107,7 @@ public class KafkaConnectorUtils {
     }
 
     public static void waitForConnectorsTaskMaxChange(String namespaceName, String connectorName, int taskMax) {
-        TestUtils.waitFor("KafkaConnector taskMax change", Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS, Constants.GLOBAL_TIMEOUT,
+        TestUtils.waitFor("KafkaConnector taskMax change", TestConstants.POLL_INTERVAL_FOR_RESOURCE_READINESS, TestConstants.GLOBAL_TIMEOUT,
             () -> (KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName)
                 .withName(connectorName).get().getSpec().getTasksMax() == taskMax)
                 && (KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName)
@@ -114,20 +117,21 @@ public class KafkaConnectorUtils {
 
     public static void waitForConnectorTaskState(String namespaceName, String connectorName, int taskId, String state) {
         LOGGER.info("Waiting for task with id: {} to be in state {}", taskId, state);
-        TestUtils.waitFor("KafkaConnector task status to be: " + state, Constants.GLOBAL_POLL_INTERVAL_MEDIUM, Constants.GLOBAL_TIMEOUT,
+        TestUtils.waitFor("KafkaConnector task status to be: " + state, TestConstants.GLOBAL_POLL_INTERVAL_MEDIUM, TestConstants.GLOBAL_TIMEOUT,
             () -> (getConnectorTaskState(namespaceName, connectorName, taskId).equals(state))
         );
     }
 
     public static String getConnectorTaskState(String namespaceName, String connectorName, int taskId) {
         KafkaConnectorStatus connectorState = KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName).withName(connectorName).get().getStatus();
+        @SuppressWarnings("unchecked")
         Map<String, Object> connectorTask = ((ArrayList<Map<String, Object>>) connectorState.getConnectorStatus().get("tasks")).stream().filter(conn -> conn.get("id").equals(taskId)).collect(Collectors.toList()).get(0);
         return  (String) connectorTask.get("state");
     }
 
     public static void waitForConnectorAutoRestartCount(String namespaceName, String connectorName, int restartCount) {
         LOGGER.info("Waiting for KafkaConnector: {}/{} to have autoRestartCount: {}", namespaceName, connectorName, restartCount);
-        TestUtils.waitFor("KafkaConnector: " + namespaceName + "/" + connectorName + " to have autoRestartCount: " + restartCount, Constants.GLOBAL_POLL_INTERVAL_MEDIUM, Constants.GLOBAL_TIMEOUT,
+        TestUtils.waitFor("KafkaConnector: " + namespaceName + "/" + connectorName + " to have autoRestartCount: " + restartCount, TestConstants.GLOBAL_POLL_INTERVAL_MEDIUM, TestConstants.GLOBAL_TIMEOUT,
             () -> (getConnectorAutoRestartCount(namespaceName, connectorName) == restartCount)
         );
     }
@@ -142,7 +146,7 @@ public class KafkaConnectorUtils {
     }
 
     public static void waitForConnectorsTaskMaxChangeViaAPI(String namespaceName, String connectPodName, String connectorName, int taskMax) {
-        TestUtils.waitFor("KafkaConnector taskMax change via API", Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS,
+        TestUtils.waitFor("KafkaConnector taskMax change via API", TestConstants.POLL_INTERVAL_FOR_RESOURCE_READINESS,
             ResourceOperation.getTimeoutForResourceReadiness(KafkaConnector.RESOURCE_KIND),
             () -> getConnectorSpecFromConnectAPI(namespaceName, connectPodName, connectorName).contains("\"tasks.max\":\"" + taskMax + "\""));
     }
@@ -158,7 +162,7 @@ public class KafkaConnectorUtils {
     }
 
     public static String waitForConnectorConfigUpdate(String namespaceName, String podName, String connectorName, String oldConfig, String apiUrl) {
-        TestUtils.waitFor("KafkaConnector config to contain desired values", Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS,
+        TestUtils.waitFor("KafkaConnector config to contain desired values", TestConstants.POLL_INTERVAL_FOR_RESOURCE_READINESS,
             ResourceOperation.getTimeoutForResourceReadiness(KafkaConnector.RESOURCE_KIND),
             () -> !oldConfig.equals(getConnectorConfig(namespaceName, podName, connectorName, apiUrl)));
         return getConnectorConfig(namespaceName, podName, connectorName, apiUrl);
@@ -170,10 +174,10 @@ public class KafkaConnectorUtils {
     public static void waitForConnectorSpecFromConnectAPIStability(String namespaceName, String podName, String connectorName, String oldSpec) {
         int[] stableCounter = {0};
 
-        TestUtils.waitFor("KafkaConnector's spec to be stable", Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_STATUS_TIMEOUT, () -> {
+        TestUtils.waitFor("KafkaConnector's spec to be stable", TestConstants.GLOBAL_POLL_INTERVAL, TestConstants.GLOBAL_STATUS_TIMEOUT, () -> {
             if (getConnectorSpecFromConnectAPI(namespaceName, podName, connectorName).equals(oldSpec)) {
                 stableCounter[0]++;
-                if (stableCounter[0] == Constants.GLOBAL_STABILITY_OFFSET_COUNT) {
+                if (stableCounter[0] == TestConstants.GLOBAL_STABILITY_OFFSET_COUNT) {
                     LOGGER.info("Connector's spec is stable for: {} poll intervals", stableCounter[0]);
                     return true;
                 }
@@ -182,14 +186,14 @@ public class KafkaConnectorUtils {
                 stableCounter[0] = 0;
                 return false;
             }
-            LOGGER.info("Connector's spec gonna be stable in {} polls", Constants.GLOBAL_STABILITY_OFFSET_COUNT - stableCounter[0]);
+            LOGGER.info("Connector's spec gonna be stable in {} polls", TestConstants.GLOBAL_STABILITY_OFFSET_COUNT - stableCounter[0]);
             return false;
         });
     }
 
     public static void waitForConnectorWorkerStatus(String namespaceName, String podName, String connectName, String connectorName, String state) {
         LOGGER.info("Waiting for worker of KafkaConnector: {}/{} to be in {} state", namespaceName, connectorName, state);
-        TestUtils.waitFor("KafkaConnector's:" + connectorName + " worker to be in state: " + state, Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS, Constants.GLOBAL_TIMEOUT,
+        TestUtils.waitFor("KafkaConnector's:" + connectorName + " worker to be in state: " + state, TestConstants.POLL_INTERVAL_FOR_RESOURCE_READINESS, TestConstants.GLOBAL_TIMEOUT,
             () -> {
                 JsonObject connectorStatus = new JsonObject(
                         cmdKubeClient().namespace(namespaceName).execInPod(podName,
@@ -203,7 +207,7 @@ public class KafkaConnectorUtils {
 
     public static void loggerStabilityWait(String namespaceName, String connectClusterName, String podName, String desiredLogger, String connectorName) {
         int[] counter = {0};
-        TestUtils.waitFor("KafkaConnector logger to be stable", Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
+        TestUtils.waitFor("KafkaConnector logger to be stable", TestConstants.GLOBAL_POLL_INTERVAL, TestConstants.GLOBAL_TIMEOUT,
             () ->  {
                 String logger = cmdKubeClient().namespace(namespaceName).execInPod(podName, "curl",
                     "http://" + KafkaConnectResources.serviceName(connectClusterName) + ":8083/admin/loggers/" + connectorName).out();
@@ -222,5 +226,102 @@ public class KafkaConnectorUtils {
                 return false;
             }
         );
+    }
+
+    /**
+     * Waits for a removal of the annotation from the KafkaConnector resource.
+     *
+     * @param namespaceName     name of the Namespace where the KafkaConnector resource is present
+     * @param connectorName     name of the KafkaConnector which should be checked
+     * @param annotationName    name of the annotation that should be deleted from the KafkaConnector's metadata
+     */
+    public static void waitForRemovalOfTheAnnotation(String namespaceName, String connectorName, String annotationName) {
+        LOGGER.info("Waiting for annotation: {} to be removed from KafkaConnector: {}/{}", annotationName, namespaceName, connectorName);
+
+        TestUtils.waitFor(String.format("annotation %s to be removed from KafkaConnector: %s/%s", annotationName, namespaceName, connectorName),
+            TestConstants.GLOBAL_POLL_INTERVAL_5_SECS,
+            TestConstants.GLOBAL_STATUS_TIMEOUT,
+            () -> KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName).withName(connectorName).get().getMetadata().getAnnotations().get(annotationName) == null
+        );
+    }
+
+    /**
+     * Using Connect API it collects the offsets from the /offset endpoint of the particular connector.
+     * It returns the result in JsonNode object for easier handling in the particular tests.
+     *
+     * @param namespaceName     name of the Namespace where the scraper Pod and Connect are running
+     * @param scraperPodName    name of the scraper Pod name for execution of the cURL command
+     * @param serviceName       name of the service which exposes the 8083 port
+     * @param connectorName     name of the connector that should be checked for the offsets
+     * @return  JsonNode object with the offsets (the result of the API call)
+     * @throws JsonProcessingException  when the JsonNode object cannot be processed
+     */
+    public static JsonNode getOffsetOfConnectorFromConnectAPI(
+        String namespaceName,
+        String scraperPodName,
+        String serviceName,
+        String connectorName
+    ) throws JsonProcessingException {
+        final ObjectMapper mapper = new ObjectMapper();
+
+        return mapper.readTree(cmdKubeClient().namespace(namespaceName).execInPod(scraperPodName,
+            "curl", "-X", "GET",
+            "http://" + serviceName + ":8083/connectors/" + connectorName + "/offsets").out().trim());
+    }
+
+    /**
+     * Waits for a specific offset to be present in the File Sink Connector.
+     *
+     * @param namespaceName     name of the Namespace where the scraper Pod and Connect are running
+     * @param scraperPodName    name of the scraper Pod name for execution of the cURL command
+     * @param connectName       name of the KafkaConnect resource which should be used for building the service name
+     * @param connectorName     name of the connector that should be checked for the offsets
+     * @param expectedOffset    offset for which we should wait
+     */
+    public static void waitForOffsetInFileSinkConnector(
+        String namespaceName,
+        String scraperPodName,
+        String connectName,
+        String connectorName,
+        int expectedOffset
+    ) {
+        waitForOffsetInConnector(
+            namespaceName,
+            scraperPodName,
+            KafkaConnectResources.serviceName(connectName),
+            connectorName,
+            "/offsets/0/offset/kafka_offset",
+            expectedOffset
+        );
+    }
+
+    /**
+     * Waits for a specific offset to be present in the Connector.
+     *
+     * @param namespaceName     name of the Namespace where the scraper Pod and Connect are running
+     * @param scraperPodName    name of the scraper Pod name for execution of the cURL command
+     * @param serviceName       name of the service which exposes the 8083 port
+     * @param connectorName     name of the connector that should be checked for the offsets
+     * @param expectedOffset    offset for which we should wait
+     */
+    public static void waitForOffsetInConnector(
+        String namespaceName,
+        String scraperPodName,
+        String serviceName,
+        String connectorName,
+        String pathInJsonToOffsetObject,
+        int expectedOffset
+    ) {
+        TestUtils.waitFor("offset on the Connector will contain expected number",
+            TestConstants.GLOBAL_POLL_INTERVAL_5_SECS,
+            TestConstants.GLOBAL_STATUS_TIMEOUT,
+            () -> {
+                try {
+                    JsonNode offsets = getOffsetOfConnectorFromConnectAPI(namespaceName, scraperPodName, serviceName, connectorName);
+                    return offsets.at(pathInJsonToOffsetObject).asInt() == expectedOffset;
+                } catch (Exception e) {
+                    return false;
+                }
+            });
     }
 }

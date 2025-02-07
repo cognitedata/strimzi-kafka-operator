@@ -1,24 +1,32 @@
-FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 LABEL org.opencontainers.image.source='https://github.com/strimzi/strimzi-kafka-operator'
 
 ARG JAVA_VERSION=17
 ARG TARGETOS
 ARG TARGETARCH
+ARG strimzi_version
+
+LABEL name='base' \
+    vendor='Strimzi' \
+    version="${strimzi_version}" \
+    release="${strimzi_version}" \
+    summary='Base image of the Strimzi Kafka Operator project.' \
+    description='Strimzi Kafka Operator base image, containing common utilities across all component images.'
 
 USER root
 
-RUN microdnf update \
-    && microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install java-${JAVA_VERSION}-openjdk-headless openssl shadow-utils \
+RUN microdnf update -y \
+    && microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install -y java-${JAVA_VERSION}-openjdk-headless openssl shadow-utils \
     && microdnf reinstall -y tzdata \
-    && microdnf clean all
+    && microdnf clean all -y
 
-ENV JAVA_HOME /usr/lib/jvm/jre-17
+ENV JAVA_HOME=/usr/lib/jvm/jre-17
 
 #####
 # Add Tini
 #####
-ENV TINI_VERSION v0.19.0
+ENV TINI_VERSION=v0.19.0
 ENV TINI_SHA256_AMD64=93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c
 ENV TINI_SHA256_ARM64=07952557df20bfd2a95f9bef198b445e006171969499a1d361bd9e6f8e5e0e81
 ENV TINI_SHA256_PPC64LE=3f658420974768e40810001a038c29d003728c5fe86da211cff5059e48cfdfde

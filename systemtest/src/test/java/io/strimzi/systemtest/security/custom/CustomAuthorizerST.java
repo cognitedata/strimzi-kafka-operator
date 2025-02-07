@@ -4,20 +4,22 @@
  */
 package io.strimzi.systemtest.security.custom;
 
-import io.strimzi.api.kafka.model.AclOperation;
-import io.strimzi.api.kafka.model.KafkaAuthorizationSimple;
-import io.strimzi.api.kafka.model.KafkaResources;
-import io.strimzi.api.kafka.model.KafkaUser;
-import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationTls;
-import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
-import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
+import io.strimzi.api.kafka.model.kafka.KafkaAuthorizationSimple;
+import io.strimzi.api.kafka.model.kafka.KafkaResources;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerAuthenticationTls;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
+import io.strimzi.api.kafka.model.user.KafkaUser;
+import io.strimzi.api.kafka.model.user.acl.AclOperation;
 import io.strimzi.systemtest.AbstractST;
-import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.Environment;
+import io.strimzi.systemtest.TestConstants;
 import io.strimzi.systemtest.annotations.ParallelTest;
 import io.strimzi.systemtest.kafkaclients.internalClients.KafkaClients;
 import io.strimzi.systemtest.kafkaclients.internalClients.KafkaClientsBuilder;
+import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.storage.TestStorage;
+import io.strimzi.systemtest.templates.crd.KafkaNodePoolTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTopicTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaUserTemplates;
@@ -26,15 +28,13 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.extension.ExtensionContext;
 
-import static io.strimzi.systemtest.Constants.REGRESSION;
-import static io.strimzi.systemtest.Constants.INTERNAL_CLIENTS_USED;
+import static io.strimzi.systemtest.TestTags.REGRESSION;
 
 @Tag(REGRESSION)
 public class CustomAuthorizerST extends AbstractST {
-    static final String CLUSTER_NAME = "custom-authorizer";
     static final String ADMIN = "sre-admin";
+    private TestStorage sharedTestStorage;
     private static final Logger LOGGER = LogManager.getLogger(CustomAuthorizerST.class);
 
     /**
@@ -58,16 +58,15 @@ public class CustomAuthorizerST extends AbstractST {
      *  - kafka-user
      */
     @ParallelTest
-    @Tag(INTERNAL_CLIENTS_USED)
-    void testAclRuleReadAndWrite(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
+    void testAclRuleReadAndWrite() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
         final String kafkaUserWrite = "kafka-user-write";
         final String kafkaUserRead = "kafka-user-read";
         final String consumerGroupName = "consumer-group-name-1";
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTopicTemplates.topic(CLUSTER_NAME, testStorage.getTopicName(), Environment.TEST_SUITE_NAMESPACE).build());
+        resourceManager.createResourceWithWait(KafkaTopicTemplates.topic(Environment.TEST_SUITE_NAMESPACE, testStorage.getTopicName(), sharedTestStorage.getClusterName()).build());
 
-        KafkaUser writeUser = KafkaUserTemplates.tlsUser(Environment.TEST_SUITE_NAMESPACE, CLUSTER_NAME, kafkaUserWrite)
+        KafkaUser writeUser = KafkaUserTemplates.tlsUser(Environment.TEST_SUITE_NAMESPACE, kafkaUserWrite, sharedTestStorage.getClusterName())
             .editSpec()
                 .withNewKafkaUserAuthorizationSimple()
                     .addNewAcl()
@@ -80,7 +79,7 @@ public class CustomAuthorizerST extends AbstractST {
             .endSpec()
             .build();
 
-        KafkaUser readUser = KafkaUserTemplates.tlsUser(Environment.TEST_SUITE_NAMESPACE, CLUSTER_NAME, kafkaUserRead)
+        KafkaUser readUser = KafkaUserTemplates.tlsUser(Environment.TEST_SUITE_NAMESPACE, kafkaUserRead, sharedTestStorage.getClusterName())
             .editSpec()
                 .withNewKafkaUserAuthorizationSimple()
                     .addNewAcl()
@@ -99,39 +98,33 @@ public class CustomAuthorizerST extends AbstractST {
             .endSpec()
             .build();
 
-        resourceManager.createResourceWithWait(extensionContext, writeUser);
-        resourceManager.createResourceWithWait(extensionContext, readUser);
+        resourceManager.createResourceWithWait(writeUser);
+        resourceManager.createResourceWithWait(readUser);
 
         LOGGER.info("Checking KafkaUser {} that is able to send messages to Topic: {}", kafkaUserWrite, testStorage.getTopicName());
 
-        KafkaClients kafkaClients = new KafkaClientsBuilder()
-            .withProducerName(testStorage.getProducerName())
-            .withConsumerName(testStorage.getConsumerName())
-            .withNamespaceName(testStorage.getNamespaceName())
-            .withMessageCount(testStorage.getMessageCount())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(CLUSTER_NAME))
-            .withTopicName(testStorage.getTopicName())
+        KafkaClients kafkaClients = ClientUtils.getInstantTlsClientBuilder(testStorage, KafkaResources.tlsBootstrapAddress(sharedTestStorage.getClusterName()))
             .withUsername(kafkaUserWrite)
             .withConsumerGroup(consumerGroupName)
             .build();
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForProducerClientSuccess(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(sharedTestStorage.getClusterName()));
+        ClientUtils.waitForInstantProducerClientSuccess(testStorage);
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.consumerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForConsumerClientTimeout(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.consumerTlsStrimzi(sharedTestStorage.getClusterName()));
+        ClientUtils.waitForInstantConsumerClientTimeout(testStorage);
 
         kafkaClients = new KafkaClientsBuilder(kafkaClients)
             .withUsername(kafkaUserRead)
             .build();
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.consumerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForConsumerClientSuccess(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.consumerTlsStrimzi(sharedTestStorage.getClusterName()));
+        ClientUtils.waitForInstantConsumerClientSuccess(testStorage);
 
         LOGGER.info("Checking KafkaUser: {}/{} that is not able to send messages to Topic: {}", testStorage.getNamespaceName(), kafkaUserRead, testStorage.getTopicName());
 
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForProducerClientTimeout(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(sharedTestStorage.getClusterName()));
+        ClientUtils.waitForInstantProducerClientTimeout(testStorage);
     }
 
     /**
@@ -151,49 +144,45 @@ public class CustomAuthorizerST extends AbstractST {
      *  - kafka-user
      */
     @ParallelTest
-    @Tag(INTERNAL_CLIENTS_USED)
-    void testAclWithSuperUser(ExtensionContext extensionContext) {
-        final TestStorage testStorage = new TestStorage(extensionContext, Environment.TEST_SUITE_NAMESPACE);
+    void testAclWithSuperUser() {
+        final TestStorage testStorage = new TestStorage(ResourceManager.getTestContext());
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTopicTemplates.topic(CLUSTER_NAME, testStorage.getTopicName(), Environment.TEST_SUITE_NAMESPACE).build());
-        resourceManager.createResourceWithWait(extensionContext, KafkaUserTemplates.tlsUser(Environment.TEST_SUITE_NAMESPACE, CLUSTER_NAME, ADMIN).build());
+        resourceManager.createResourceWithWait(KafkaTopicTemplates.topic(Environment.TEST_SUITE_NAMESPACE, testStorage.getTopicName(), sharedTestStorage.getClusterName()).build());
+        resourceManager.createResourceWithWait(KafkaUserTemplates.tlsUser(Environment.TEST_SUITE_NAMESPACE, ADMIN, sharedTestStorage.getClusterName()).build());
 
-        KafkaClients kafkaClients = new KafkaClientsBuilder()
-            .withProducerName(testStorage.getProducerName())
-            .withConsumerName(testStorage.getConsumerName())
-            .withNamespaceName(testStorage.getNamespaceName())
-            .withMessageCount(testStorage.getMessageCount())
-            .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(CLUSTER_NAME))
-            .withTopicName(testStorage.getTopicName())
+        final KafkaClients kafkaClients = ClientUtils.getInstantTlsClientBuilder(testStorage, KafkaResources.tlsBootstrapAddress(sharedTestStorage.getClusterName()))
             .withUsername(ADMIN)
             .build();
 
         LOGGER.info("Checking Kafka Super User: {}/{} is able to produce/consume despite having no explicit rights in KafkaUser", Environment.TEST_SUITE_NAMESPACE, ADMIN);
-        resourceManager.createResourceWithWait(extensionContext, kafkaClients.producerTlsStrimzi(CLUSTER_NAME), kafkaClients.consumerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForClientsSuccess(testStorage);
+        resourceManager.createResourceWithWait(kafkaClients.producerTlsStrimzi(sharedTestStorage.getClusterName()), kafkaClients.consumerTlsStrimzi(sharedTestStorage.getClusterName()));
+        ClientUtils.waitForInstantClientSuccess(testStorage);
     }
 
     @BeforeAll
-    public void setup(ExtensionContext extensionContext) {
+    public void setup() {
+        sharedTestStorage = new TestStorage(ResourceManager.getTestContext());
+        
         this.clusterOperator = this.clusterOperator
-            .defaultInstallation(extensionContext)
+            .defaultInstallation()
             .createInstallation()
             .runInstallation();
 
-        resourceManager.createResourceWithWait(extensionContext, KafkaTemplates.kafkaPersistent(CLUSTER_NAME, 1, 1)
-            .editMetadata()
-                .withNamespace(Environment.TEST_SUITE_NAMESPACE)
-            .endMetadata()
+        resourceManager.createResourceWithWait(
+            KafkaNodePoolTemplates.brokerPoolPersistentStorage(sharedTestStorage.getNamespaceName(), sharedTestStorage.getBrokerPoolName(), sharedTestStorage.getClusterName(), 1).build(),
+            KafkaNodePoolTemplates.controllerPoolPersistentStorage(sharedTestStorage.getNamespaceName(), sharedTestStorage.getControllerPoolName(), sharedTestStorage.getClusterName(), 1).build()
+        );
+        resourceManager.createResourceWithWait(KafkaTemplates.kafka(sharedTestStorage.getNamespaceName(), sharedTestStorage.getClusterName(), 1)
             .editSpec()
                 .editKafka()
                     .addToConfig("auto.create.topics.enable", "true")
                     .withNewKafkaAuthorizationCustom()
-                        .withAuthorizerClass(Environment.isKRaftModeEnabled() ? KafkaAuthorizationSimple.KRAFT_AUTHORIZER_CLASS_NAME : KafkaAuthorizationSimple.AUTHORIZER_CLASS_NAME)
+                        .withAuthorizerClass(KafkaAuthorizationSimple.KRAFT_AUTHORIZER_CLASS_NAME)
                         .withSupportsAdminApi(true)
                         .withSuperUsers("CN=" + ADMIN)
                     .endKafkaAuthorizationCustom()
                     .withListeners(new GenericKafkaListenerBuilder()
-                            .withName(Constants.TLS_LISTENER_DEFAULT_NAME)
+                            .withName(TestConstants.TLS_LISTENER_DEFAULT_NAME)
                             .withPort(9093)
                             .withType(KafkaListenerType.INTERNAL)
                             .withTls(true)

@@ -6,20 +6,23 @@ package io.strimzi.operator.cluster.operator.assembly;
 
 import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaBuilder;
-import io.strimzi.api.kafka.model.KafkaResources;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaBuilder;
+import io.strimzi.api.kafka.model.kafka.KafkaList;
+import io.strimzi.api.kafka.model.kafka.KafkaResources;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
 import io.strimzi.certs.OpenSslCertManager;
-import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
+import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
-import io.strimzi.operator.common.model.PasswordGenerator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.ClusterRoleBindingOperator;
+import io.strimzi.operator.cluster.operator.resource.kubernetes.CrdOperator;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
-import io.strimzi.operator.common.operator.resource.ClusterRoleBindingOperator;
-import io.strimzi.operator.common.operator.resource.CrdOperator;
+import io.strimzi.operator.common.model.PasswordGenerator;
 import io.strimzi.platform.KubernetesVersion;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -48,18 +51,19 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(VertxExtension.class)
 public class KafkaAssemblyOperatorNonParametrizedTest {
-
-    public static final String NAMESPACE = "test";
-    public static final String NAME = "my-kafka";
-    private static Vertx vertx;
-    private static WorkerExecutor sharedWorkerExecutor;
-    private final OpenSslCertManager certManager = new OpenSslCertManager();
-    private final PasswordGenerator passwordGenerator = new PasswordGenerator(12,
+    private static final String NAMESPACE = "test";
+    private static final String NAME = "my-kafka";
+    private static final OpenSslCertManager CERT_MANAGER = new OpenSslCertManager();
+    @SuppressWarnings("SpellCheckingInspection")
+    private static final PasswordGenerator PASSWORD_GENERATOR = new PasswordGenerator(12,
             "abcdefghijklmnopqrstuvwxyz" +
                     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
             "abcdefghijklmnopqrstuvwxyz" +
                     "ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
                     "0123456789");
+
+    private static Vertx vertx;
+    private static WorkerExecutor sharedWorkerExecutor;
 
     @BeforeAll
     public static void before() {
@@ -80,7 +84,7 @@ public class KafkaAssemblyOperatorNonParametrizedTest {
         ArgumentCaptor<ClusterRoleBinding> desiredCrb = ArgumentCaptor.forClass(ClusterRoleBinding.class);
         when(mockCrbOps.reconcile(any(), eq(KafkaResources.initContainerClusterRoleBindingName(NAME, NAMESPACE)), desiredCrb.capture())).thenReturn(Future.succeededFuture());
 
-        KafkaAssemblyOperator op = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(false, KubernetesVersion.MINIMAL_SUPPORTED_VERSION), certManager, passwordGenerator,
+        KafkaAssemblyOperator op = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(false, KubernetesVersion.MINIMAL_SUPPORTED_VERSION), CERT_MANAGER, PASSWORD_GENERATOR,
                 supplier, new ClusterOperatorConfig.ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup()).with(ClusterOperatorConfig.OPERATION_TIMEOUT_MS.key(), "1").build());
         Reconciliation reconciliation = new Reconciliation("test-trigger", Kafka.RESOURCE_KIND, NAMESPACE, NAME);
 
@@ -99,20 +103,22 @@ public class KafkaAssemblyOperatorNonParametrizedTest {
     public void testSelectorLabels(VertxTestContext context) {
         Kafka kafka = new KafkaBuilder()
                 .withNewMetadata()
-                        .withName(NAME)
-                        .withNamespace(NAMESPACE)
+                    .withName(NAME)
+                    .withNamespace(NAMESPACE)
+                    .withAnnotations(Map.of(
+                            Annotations.ANNO_STRIMZI_IO_NODE_POOLS, "enabled",
+                            Annotations.ANNO_STRIMZI_IO_KRAFT, "enabled"
+                    ))
                 .endMetadata()
                 .withNewSpec()
                     .withNewKafka()
-                        .withReplicas(3)
-                        .withNewEphemeralStorage()
-                        .endEphemeralStorage()
+                        .withListeners(new GenericKafkaListenerBuilder()
+                                .withName("plain")
+                                .withPort(9092)
+                                .withType(KafkaListenerType.INTERNAL)
+                                .withTls(false)
+                                .build())
                     .endKafka()
-                    .withNewZookeeper()
-                        .withReplicas(3)
-                        .withNewEphemeralStorage()
-                        .endEphemeralStorage()
-                    .endZookeeper()
                 .endSpec()
                 .build();
 
@@ -128,7 +134,7 @@ public class KafkaAssemblyOperatorNonParametrizedTest {
                 .with(ClusterOperatorConfig.OPERATION_TIMEOUT_MS.key(), "120000")
                 .with(ClusterOperatorConfig.CUSTOM_RESOURCE_SELECTOR.key(), Map.of("selectorLabel", "value").entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.joining(","))).build();
 
-        KafkaAssemblyOperator op = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(false, KubernetesVersion.MINIMAL_SUPPORTED_VERSION), certManager, passwordGenerator,
+        KafkaAssemblyOperator op = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(false, KubernetesVersion.MINIMAL_SUPPORTED_VERSION), CERT_MANAGER, PASSWORD_GENERATOR,
                 supplier, config);
         Reconciliation reconciliation = new Reconciliation("test-trigger", Kafka.RESOURCE_KIND, NAMESPACE, NAME);
 
@@ -139,7 +145,6 @@ public class KafkaAssemblyOperatorNonParametrizedTest {
                     // beginning with success. It should not reconcile any resources other than getting the Kafka
                     // resource itself.
                     verifyNoInteractions(
-                            supplier.stsOperations,
                             supplier.serviceOperations,
                             supplier.secretOperations,
                             supplier.configMapOperations,

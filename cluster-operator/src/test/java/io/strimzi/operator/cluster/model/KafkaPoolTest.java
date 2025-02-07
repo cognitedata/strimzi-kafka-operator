@@ -8,16 +8,19 @@ import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
-import io.strimzi.api.kafka.model.ContainerEnvVarBuilder;
-import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.KafkaBuilder;
+import io.strimzi.api.kafka.model.common.template.ContainerEnvVarBuilder;
+import io.strimzi.api.kafka.model.kafka.JbodStorageBuilder;
+import io.strimzi.api.kafka.model.kafka.Kafka;
+import io.strimzi.api.kafka.model.kafka.KafkaBuilder;
+import io.strimzi.api.kafka.model.kafka.PersistentClaimStorageBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePool;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePoolBuilder;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePoolStatus;
 import io.strimzi.api.kafka.model.nodepool.ProcessRoles;
-import io.strimzi.api.kafka.model.storage.JbodStorageBuilder;
-import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
 import io.strimzi.operator.cluster.model.nodepools.NodeIdAssignment;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.InvalidResourceException;
 import org.junit.jupiter.api.Test;
@@ -42,13 +45,16 @@ public class KafkaPoolTest {
                 .withNewMetadata()
                     .withName(CLUSTER_NAME)
                     .withNamespace(NAMESPACE)
+                    .withAnnotations(Map.of(Annotations.ANNO_STRIMZI_IO_NODE_POOLS, "enabled", Annotations.ANNO_STRIMZI_IO_KRAFT, "enabled"))
                 .endMetadata()
                 .withNewSpec()
                     .withNewKafka()
-                        .withReplicas(3)
-                        .withNewJbodStorage()
-                            .withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("200Gi").build())
-                        .endJbodStorage()
+                        .withListeners(new GenericKafkaListenerBuilder()
+                            .withName("listener")
+                            .withPort(9092)
+                            .withTls(true)
+                            .withType(KafkaListenerType.INTERNAL)
+                            .build())
                     .endKafka()
                 .endSpec()
                 .build();
@@ -80,7 +86,7 @@ public class KafkaPoolTest {
                 Reconciliation.DUMMY_RECONCILIATION,
                 KAFKA,
                 POOL,
-                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of()),
+                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of(), Set.of()),
                 new JbodStorageBuilder().withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("100Gi").build()).build(),
                 OWNER_REFERENCE,
                 SHARED_ENV_PROVIDER
@@ -123,10 +129,12 @@ public class KafkaPoolTest {
         assertThat(status.getLabelSelector(), is("strimzi.io/cluster=my-cluster,strimzi.io/name=my-cluster-kafka,strimzi.io/kind=Kafka,strimzi.io/pool-name=pool"));
         assertThat(status.getNodeIds().size(), is(3));
         assertThat(status.getNodeIds(), hasItems(10, 11, 13));
+        assertThat(status.getRoles().size(), is(1));
+        assertThat(status.getRoles(), hasItems(ProcessRoles.BROKER));
     }
 
     @Test
-    public void testKafkaPoolWithKRaftRoles()  {
+    public void testKafkaPoolWithKRaftControllerRole()  {
         KafkaNodePool pool = new KafkaNodePoolBuilder(POOL)
                 .editSpec()
                     .withRoles(ProcessRoles.CONTROLLER)
@@ -137,7 +145,7 @@ public class KafkaPoolTest {
                 Reconciliation.DUMMY_RECONCILIATION,
                 KAFKA,
                 pool,
-                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of()),
+                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of(), Set.of()),
                 new JbodStorageBuilder().withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("100Gi").build()).build(),
                 OWNER_REFERENCE,
                 SHARED_ENV_PROVIDER
@@ -168,7 +176,7 @@ public class KafkaPoolTest {
                 Reconciliation.DUMMY_RECONCILIATION,
                 KAFKA,
                 pool,
-                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of()),
+                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of(), Set.of()),
                 new JbodStorageBuilder().withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("100Gi").build()).build(),
                 OWNER_REFERENCE,
                 SHARED_ENV_PROVIDER
@@ -208,7 +216,7 @@ public class KafkaPoolTest {
                 Reconciliation.DUMMY_RECONCILIATION,
                 KAFKA,
                 pool,
-                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of()),
+                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of(), Set.of()),
                 new JbodStorageBuilder().withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("100Gi").build()).build(),
                 OWNER_REFERENCE,
                 SHARED_ENV_PROVIDER
@@ -253,7 +261,7 @@ public class KafkaPoolTest {
                 Reconciliation.DUMMY_RECONCILIATION,
                 kafka,
                 POOL,
-                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of()),
+                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of(), Set.of()),
                 new JbodStorageBuilder().withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("100Gi").build()).build(),
                 OWNER_REFERENCE,
                 SHARED_ENV_PROVIDER
@@ -313,7 +321,7 @@ public class KafkaPoolTest {
                 Reconciliation.DUMMY_RECONCILIATION,
                 kafka,
                 pool,
-                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of()),
+                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of(), Set.of()),
                 new JbodStorageBuilder().withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("100Gi").build()).build(),
                 OWNER_REFERENCE,
                 SHARED_ENV_PROVIDER
@@ -368,7 +376,7 @@ public class KafkaPoolTest {
                 Reconciliation.DUMMY_RECONCILIATION,
                 kafka,
                 pool,
-                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of()),
+                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of(), Set.of()),
                 new JbodStorageBuilder().withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("100Gi").build()).build(),
                 OWNER_REFERENCE,
                 SHARED_ENV_PROVIDER
@@ -405,7 +413,7 @@ public class KafkaPoolTest {
                 Reconciliation.DUMMY_RECONCILIATION,
                 KAFKA,
                 pool,
-                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of()),
+                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of(), Set.of()),
                 new JbodStorageBuilder().withVolumes(new PersistentClaimStorageBuilder().withId(0).withSize("100Gi").build()).build(),
                 OWNER_REFERENCE,
                 SHARED_ENV_PROVIDER
@@ -428,7 +436,7 @@ public class KafkaPoolTest {
                 Reconciliation.DUMMY_RECONCILIATION,
                 KAFKA,
                 pool,
-                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of()),
+                new NodeIdAssignment(Set.of(10, 11, 13), Set.of(10, 11, 13), Set.of(), Set.of(), Set.of()),
                 null,
                 OWNER_REFERENCE,
                 SHARED_ENV_PROVIDER

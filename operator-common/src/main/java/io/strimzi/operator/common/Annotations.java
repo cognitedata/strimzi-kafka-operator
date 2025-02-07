@@ -25,35 +25,20 @@ import static java.lang.Integer.parseInt;
 public class Annotations extends ResourceAnnotations {
 
     /**
-     * Annotation for keeping Kafka and ZooKeeper servers' certificate thumbprints.
+     * Annotation for keeping Kafka servers' certificate thumbprints.
      */
     public static final String ANNO_STRIMZI_SERVER_CERT_HASH = STRIMZI_DOMAIN + "server-cert-hash";
 
     /**
-     * Strimzi logging annotation
-     */
-    public static final String STRIMZI_LOGGING_ANNOTATION = STRIMZI_DOMAIN + "logging";
-
-    /**
-     * Annotations for rolling a cluster whenever the logging (or it's part) has changed.
-     * By changing the annotation we force a restart since the pod will be out of date compared to the StrimziPodSet.
+     * Annotation for tracking changes to logging configurations which cannot be changed dynamically. By changing the
+     * annotation we force a restart of the pods managed by StrimziPodSets or Deployments.
      */
     public static final String ANNO_STRIMZI_LOGGING_HASH = STRIMZI_DOMAIN + "logging-hash";
-
-    /**
-     * Annotation for tracking changes to logging appenders which cannot be changed dynamically
-     */
-    public static final String ANNO_STRIMZI_LOGGING_APPENDERS_HASH = STRIMZI_DOMAIN + "logging-appenders-hash";
 
     /**
      * Annotation for tracking authentication changes
      */
     public static final String ANNO_STRIMZI_AUTH_HASH = STRIMZI_DOMAIN + "auth-hash";
-
-    /**
-     * Annotation which enabled the use of the connector operator
-     */
-    public static final String STRIMZI_IO_USE_CONNECTOR_RESOURCES = STRIMZI_DOMAIN + "use-connector-resources";
 
     /**
      * Annotation used to store the revision of the Kafka Connect build (hash of the Dockerfile)
